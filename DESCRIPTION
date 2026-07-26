@@ -1,0 +1,50 @@
+Package: rtranscribe
+Type: Package
+Title: Speech Recognition with 'transcribe.cpp'
+Version: 0.1.0
+Authors@R: c(
+    person("Johannes B.", "Gruber", , "johannes.gruber@gesis.org",
+           role = c("aut", "cre", "cph")),
+    person("The transcribe.cpp authors", role = "cph",
+           comment = "Bundled 'transcribe.cpp' sources"),
+    person("The ggml authors", role = "cph",
+           comment = "Bundled 'ggml' sources"),
+    person("Rich Geldreich and Tenacious Software LLC", role = "cph",
+           comment = "Bundled 'miniz' sources"),
+    person("Mozilla Foundation", role = "cph",
+           comment = "Bundled 'llamafile' tinyBLAS sources")
+  )
+Description: Bindings to 'transcribe.cpp', a C++ automatic speech
+    recognition library supporting many model families (Whisper, Parakeet,
+    Moonshine, Voxtral and others) in the 'GGUF' format. Transcribe audio to
+    text with segment-, word- and token-level timestamps, speaker
+    diarization, batch processing and incremental streaming. The
+    'transcribe.cpp' and 'ggml' sources are bundled and built from source,
+    so no separate installation of the library is required.
+License: MIT + file LICENSE
+Encoding: UTF-8
+URL: https://github.com/JBGruber/rtranscribe
+BugReports: https://github.com/JBGruber/rtranscribe/issues
+Depends:
+    R (>= 4.1.0)
+Imports:
+    cli,
+    Rcpp,
+    stats,
+    tibble,
+    tools,
+    utils
+LinkingTo:
+    Rcpp
+Suggests:
+    av,
+    curl,
+    httr2,
+    methods,
+    testthat (>= 3.0.0)
+SystemRequirements: cmake (>= 3.16), C++17, GNU make
+Config/testthat/edition: 3
+Roxygen: list(markdown = TRUE)
+Biarch: false
+Config/roxygen2/version: 8.0.0
+OS_type: unix

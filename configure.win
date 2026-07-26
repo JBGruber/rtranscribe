@@ -1,0 +1,94 @@
+#!/bin/sh
+# Windows (Rtools / UCRT / MinGW) build of the vendored transcribe.cpp.
+#
+# STATUS: UNPROVEN. DESCRIPTION currently carries `OS_type: unix`, so this
+# script is not reached by a normal install. It is kept in the tree as the
+# starting point for Windows support; drop the OS_type field once a Windows
+# R-CMD-check run is green.
+#
+# Differences from the POSIX `configure`:
+#   * CMake needs an explicit MinGW/MSYS generator, since it would otherwise
+#     pick the Visual Studio generator when MSVC is present.
+#   * Rtools ships its own gcc/g++; those must be used so the archives are ABI
+#     compatible with the package DLL.
+#   * The system library set differs (bcrypt/advapi32 instead of dl/pthread).
+set -e
+
+: "${R_HOME:?R_HOME is not set; run this via R CMD INSTALL}"
+RBIN="${R_HOME}/bin/R"
+
+if [ -z "${CMAKE:-}" ]; then
+  CMAKE="$(command -v cmake 2>/dev/null || true)"
+fi
+if [ -z "$CMAKE" ]; then
+  echo "ERROR: cmake not found. Install it (e.g. 'pacman -S mingw-w64-ucrt-x86_64-cmake'" >&2
+  echo "       inside Rtools, or from https://cmake.org/download/) and retry." >&2
+  exit 1
+fi
+
+VENDOR="src/transcribe-cpp"
+BUILD="${VENDOR}/build"
+PREFIX="${PWD}/${VENDOR}/install"
+
+CC_FULL="$("$RBIN" CMD config CC)"
+CXX_FULL="$("$RBIN" CMD config CXX)"
+CC_BIN="${CC_FULL%% *}"
+CXX_BIN="${CXX_FULL%% *}"
+
+if [ "${TRANSCRIBE_R_NATIVE:-0}" = "1" ]; then
+  CPUFLAGS="-DGGML_NATIVE=ON"
+else
+  CPUFLAGS="-DTRANSCRIBE_X86_CONSERVATIVE=ON -DGGML_NATIVE=OFF"
+fi
+
+NJOBS="${TRANSCRIBE_R_JOBS:-2}"
+
+"$CMAKE" -S "$VENDOR" -B "$BUILD" -G "MSYS Makefiles" \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_C_COMPILER="$CC_BIN" \
+  -DCMAKE_CXX_COMPILER="$CXX_BIN" \
+  -DCMAKE_INSTALL_PREFIX="$PREFIX" \
+  -DTRANSCRIBE_BUILD_SHARED=OFF \
+  -DTRANSCRIBE_INSTALL=ON \
+  -DTRANSCRIBE_BUILD_TESTS=OFF \
+  -DTRANSCRIBE_BUILD_EXAMPLES=OFF \
+  -DTRANSCRIBE_BUILD_TOOLS=OFF \
+  -DTRANSCRIBE_USE_OPENMP=OFF \
+  -DTRANSCRIBE_USE_SYSTEM_BLAS=OFF \
+  -DGGML_CCACHE=OFF \
+  $CPUFLAGS
+
+"$CMAKE" --build "$BUILD" --config Release -j "$NJOBS"
+"$CMAKE" --install "$BUILD" >/dev/null
+
+LIBDIR="$PREFIX/lib"
+[ -d "$LIBDIR" ] || LIBDIR="$PREFIX/lib64"
+
+MANIFEST="$LIBDIR/transcribe-link.json"
+json_array() {
+  sed -n "s/.*\"$2\"[[:space:]]*:[[:space:]]*\[\([^]]*\)\].*/\1/p" "$1" \
+    | tr ',' '\n' \
+    | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/^"//' -e 's/"$//' \
+    | grep -v '^$' || true
+}
+
+ARCHIVES=""
+if [ -f "$MANIFEST" ]; then
+  for l in $(json_array "$MANIFEST" libraries); do
+    [ -f "$LIBDIR/lib${l}.a" ] && ARCHIVES="$ARCHIVES $LIBDIR/lib${l}.a"
+  done
+fi
+[ -z "$ARCHIVES" ] && ARCHIVES="$(ls "$LIBDIR"/*.a 2>/dev/null | tr '\n' ' ')"
+if [ -z "$ARCHIVES" ]; then
+  echo "ERROR: no static archives found in $LIBDIR" >&2
+  exit 1
+fi
+
+PKG_LIBS="-Wl,--start-group ${ARCHIVES} -Wl,--end-group -lstdc++ -lpthread -lbcrypt -ladvapi32"
+VENDOR_INC="${PWD}/${VENDOR}/include"
+
+sed -e "s|@PKG_LIBS@|${PKG_LIBS}|" \
+    -e "s|@VENDOR_INC@|${VENDOR_INC}|" \
+    src/Makevars.win.in > src/Makevars.win
+
+exit 0

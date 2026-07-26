@@ -1,0 +1,3 @@
+#!/bin/sh
+rm -rf src/transcribe-cpp/build src/transcribe-cpp/install
+rm -f src/Makevars

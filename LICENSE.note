@@ -1,0 +1,47 @@
+The rtranscribe R package is released under the MIT licence (see LICENSE
+and LICENSE.md).
+
+The package bundles third-party sources under src/transcribe-cpp/, which are
+compiled into the package's shared object at install time. Every bundled
+component is MIT licensed; there is no copyleft code in the compiled path.
+Verbatim copies of the upstream notices are installed under inst/licenses/
+and are available from an installed package with:
+
+    system.file("licenses", package = "rtranscribe")
+
+-------------------------------------------------------------------------
+Component        Licence   Copyright                        Notice
+-------------------------------------------------------------------------
+transcribe.cpp   MIT       (c) 2026 The transcribe.cpp      inst/licenses/
+                           authors                          transcribe.cpp-LICENSE
+
+ggml             MIT       (c) 2023-2026 The ggml authors   inst/licenses/
+(core + CPU                                                 ggml-LICENSE
+ backend)
+
+llamafile /      MIT       (c) 2024 Mozilla Foundation      header comment of
+tinyBLAS                                                    src/transcribe-cpp/ggml/
+(sgemm.cpp,                                                 src/ggml-cpu/llamafile/
+ compiled in via                                            sgemm.cpp
+ GGML_LLAMAFILE=ON)
+
+miniz            MIT       (c) 2013-2014 RAD Game Tools     inst/licenses/
+                           and Valve Software;              miniz-LICENSE
+                           (c) 2010-2014 Rich Geldreich
+                           and Tenacious Software LLC
+-------------------------------------------------------------------------
+
+Note on miniz: the amalgamated miniz.c / miniz.h files carry a header comment
+describing the code as "public domain". That comment is a stale upstream
+artifact. The authoritative licence for the bundled copy is the MIT text at
+src/transcribe-cpp/src/third_party/miniz/LICENSE (reproduced in
+inst/licenses/miniz-LICENSE), which is also what upstream's
+THIRD-PARTY-LICENSES.md identifies as controlling.
+
+Pruned components: the upstream ggml tree ships GPU backends (ggml-cuda,
+ggml-vulkan, ggml-sycl, ggml-metal, ggml-openvino and others), some of which
+contain Apache-2.0 licensed files. None of them are vendored into this
+package and none are compiled -- tools/vendor.sh keeps only the CPU backend.
+
+The exact upstream revision that was vendored is recorded in
+src/transcribe-cpp/VENDOR.

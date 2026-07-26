@@ -1,0 +1,202 @@
+#!/bin/sh
+# Build the vendored transcribe.cpp via its own CMake, then emit src/Makevars
+# so R links the resulting static archives into the package shared object.
+#
+# Everything is written inside the package build directory (src/transcribe-cpp/
+# build and install), never outside it.
+#
+# Environment knobs:
+#   TRANSCRIBE_R_NATIVE=1   build with -march=native (local source installs only;
+#                           the resulting binary is NOT portable to other CPUs)
+#   TRANSCRIBE_R_JOBS=N     parallel compile jobs (default: detected core count)
+#   CMAKE                   path to a cmake binary to use
+set -e
+
+: "${R_HOME:?R_HOME is not set; run this via R CMD INSTALL}"
+RBIN="${R_HOME}/bin/R"
+
+# --------------------------------------------------------------------------
+# Locate cmake
+# --------------------------------------------------------------------------
+if [ -z "${CMAKE:-}" ]; then
+  CMAKE="$(command -v cmake 2>/dev/null || true)"
+fi
+if [ -z "$CMAKE" ]; then
+  cat >&2 <<'EOF'
+------------------------------ ERROR ------------------------------
+'cmake' was not found on the PATH.
+
+rtranscribe builds the bundled transcribe.cpp sources with CMake, so
+cmake (>= 3.16) must be installed before the package can be built:
+
+  Debian/Ubuntu:  sudo apt-get install cmake
+  Fedora:         sudo dnf install cmake
+  Arch:           sudo pacman -S cmake
+  macOS:          brew install cmake
+
+If cmake is installed somewhere unusual, point the build at it with:
+
+  CMAKE=/path/to/cmake R CMD INSTALL .
+-------------------------------------------------------------------
+EOF
+  exit 1
+fi
+
+VENDOR="src/transcribe-cpp"
+BUILD="${VENDOR}/build"
+PREFIX="${PWD}/${VENDOR}/install"
+
+if [ ! -f "${VENDOR}/CMakeLists.txt" ]; then
+  echo "ERROR: vendored sources missing at ${VENDOR}. Run tools/vendor.sh." >&2
+  exit 1
+fi
+
+# --------------------------------------------------------------------------
+# Match R's toolchain so the static archives link cleanly into the package .so.
+#
+# 'R CMD config CXX' returns the compiler AND its standard flag
+# (e.g. "g++ -std=gnu++20"). CMAKE_CXX_COMPILER takes a program, not a
+# command line, so split the first word off and let the upstream CMake
+# choose the language standard (it requires C++17).
+# --------------------------------------------------------------------------
+CC_FULL="$("$RBIN" CMD config CC)"
+CXX_FULL="$("$RBIN" CMD config CXX)"
+CC_BIN="${CC_FULL%% *}"
+CXX_BIN="${CXX_FULL%% *}"
+
+# --------------------------------------------------------------------------
+# CPU baseline. Distributed binaries must run on older CPUs, so default to a
+# conservative instruction set; opt into -march=native explicitly.
+# --------------------------------------------------------------------------
+if [ "${TRANSCRIBE_R_NATIVE:-0}" = "1" ]; then
+  CPUFLAGS="-DGGML_NATIVE=ON"
+  echo "*** rtranscribe: building for THIS machine's CPU (-march=native)"
+else
+  CPUFLAGS="-DTRANSCRIBE_X86_CONSERVATIVE=ON -DGGML_NATIVE=OFF"
+fi
+
+if [ -n "${TRANSCRIBE_R_JOBS:-}" ]; then
+  NJOBS="$TRANSCRIBE_R_JOBS"
+else
+  NJOBS="$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)"
+fi
+
+echo "*** rtranscribe: configuring bundled transcribe.cpp (cmake: $CMAKE)"
+"$CMAKE" -S "$VENDOR" -B "$BUILD" \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_C_COMPILER="$CC_BIN" \
+  -DCMAKE_CXX_COMPILER="$CXX_BIN" \
+  -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+  -DCMAKE_INSTALL_PREFIX="$PREFIX" \
+  -DTRANSCRIBE_BUILD_SHARED=OFF \
+  -DTRANSCRIBE_INSTALL=ON \
+  -DTRANSCRIBE_BUILD_TESTS=OFF \
+  -DTRANSCRIBE_BUILD_EXAMPLES=OFF \
+  -DTRANSCRIBE_BUILD_TOOLS=OFF \
+  -DTRANSCRIBE_USE_OPENMP=OFF \
+  -DTRANSCRIBE_USE_SYSTEM_BLAS=OFF \
+  -DTRANSCRIBE_METAL=OFF \
+  -DGGML_CCACHE=OFF \
+  $CPUFLAGS
+
+echo "*** rtranscribe: compiling bundled transcribe.cpp (${NJOBS} jobs, this takes a while)"
+"$CMAKE" --build "$BUILD" --config Release -j "$NJOBS"
+"$CMAKE" --install "$BUILD" >/dev/null
+
+# --------------------------------------------------------------------------
+# Assemble the link line.
+#
+# lib/transcribe-link.json is the authoritative description of what to link
+# and in what order. Parse the two arrays we need with sed (no JSON package
+# needed at configure time); fall back to a glob if the manifest is missing
+# or its shape changes.
+# --------------------------------------------------------------------------
+LIBDIR=""
+for d in "$PREFIX/lib" "$PREFIX/lib64"; do
+  [ -d "$d" ] && LIBDIR="$d" && break
+done
+if [ -z "$LIBDIR" ]; then
+  echo "ERROR: no lib directory produced under $PREFIX" >&2
+  exit 1
+fi
+
+MANIFEST="$LIBDIR/transcribe-link.json"
+
+json_array() {
+  # $1 = manifest path, $2 = key. Emits one bare element per line.
+  sed -n "s/.*\"$2\"[[:space:]]*:[[:space:]]*\[\([^]]*\)\].*/\1/p" "$1" \
+    | tr ',' '\n' \
+    | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/^"//' -e 's/"$//' \
+    | grep -v '^$' || true
+}
+
+ARCHIVES=""
+if [ -f "$MANIFEST" ]; then
+  for l in $(json_array "$MANIFEST" libraries); do
+    if [ -f "$LIBDIR/lib${l}.a" ]; then
+      ARCHIVES="$ARCHIVES $LIBDIR/lib${l}.a"
+    fi
+  done
+fi
+if [ -z "$ARCHIVES" ]; then
+  echo "*** rtranscribe: link manifest unusable, falling back to archive glob"
+  ARCHIVES="$(ls "$LIBDIR"/*.a 2>/dev/null | tr '\n' ' ')"
+fi
+if [ -z "$ARCHIVES" ]; then
+  echo "ERROR: no static archives found in $LIBDIR" >&2
+  exit 1
+fi
+
+SYSLIBS=""
+if [ -f "$MANIFEST" ]; then
+  for s in $(json_array "$MANIFEST" system_libs); do
+    SYSLIBS="$SYSLIBS -l${s}"
+  done
+  for f in $(json_array "$MANIFEST" frameworks); do
+    SYSLIBS="$SYSLIBS -framework ${f}"
+  done
+fi
+
+OS="$(uname -s)"
+if [ -z "$SYSLIBS" ]; then
+  # Manifest gave us nothing; use per-platform defaults.
+  if [ "$OS" = "Darwin" ]; then
+    SYSLIBS="-lc++ -framework Accelerate -framework Foundation"
+  else
+    SYSLIBS="-lstdc++ -lm -lpthread -ldl"
+  fi
+fi
+
+if [ "$OS" = "Darwin" ]; then
+  # ld64 resolves archives across multiple passes; plain listing is fine and
+  # --start-group is not supported.
+  PKG_LIBS="${ARCHIVES} ${SYSLIBS}"
+else
+  # GNU ld: --start-group makes inter-archive ordering irrelevant.
+  #
+  # --exclude-libs,ALL keeps the archives' public symbols (the ~130 exported
+  # transcribe_* entry points) out of the shared object's dynamic symbol
+  # table. R only needs R_init_rtranscribe, and hiding the rest avoids
+  # colliding with any other loaded package that embeds transcribe.cpp or
+  # ggml. Verified supported before use, since not every linker accepts it.
+  EXCLUDE=""
+  if echo 'int main(void){return 0;}' > conftest.c 2>/dev/null; then
+    if "$CC_BIN" -Wl,--exclude-libs,ALL -o conftest.out conftest.c >/dev/null 2>&1; then
+      EXCLUDE="-Wl,--exclude-libs,ALL"
+    fi
+    rm -f conftest.c conftest.out
+  fi
+  PKG_LIBS="-Wl,--start-group ${ARCHIVES} -Wl,--end-group ${EXCLUDE} ${SYSLIBS}"
+fi
+
+VENDOR_INC="${PWD}/${VENDOR}/include"
+
+# --------------------------------------------------------------------------
+# Emit src/Makevars
+# --------------------------------------------------------------------------
+sed -e "s|@PKG_LIBS@|${PKG_LIBS}|" \
+    -e "s|@VENDOR_INC@|${VENDOR_INC}|" \
+    src/Makevars.in > src/Makevars
+
+echo "*** rtranscribe: native library ready"
+exit 0
