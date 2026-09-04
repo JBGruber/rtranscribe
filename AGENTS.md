@@ -152,11 +152,13 @@ Two halves have to agree, and they are in different files:
 1. `tools/vendor.sh` — the allowlist decides which backend sources are in the
    tree at all (`ggml-cpu`, `ggml-vulkan`, `ggml-cuda`, `ggml-metal`).
 2. `configure` — `require_backend_sources()` checks the directory is there,
-   then a dependency probe runs before CMake: `glslc` plus a
-   `#include <vulkan/vulkan.h>` compile test for Vulkan, `nvcc` (or `CUDACXX`)
-   for CUDA, `uname -s` for Metal. Each failure prints a per-distribution
-   install hint, because the CMake-level failure for a missing `glslc` is
-   unreadable.
+   then a dependency probe runs before CMake: for Vulkan, `glslc` plus a
+   `#include <vulkan/vulkan.h>` compile test plus a throwaway CMake project
+   doing `find_package(SPIRV-Headers CONFIG)` (ggml-vulkan requires that
+   package and includes `<spirv/unified1/spirv.hpp>`, and it is packaged
+   separately from the loader); `nvcc` (or `CUDACXX`) for CUDA; `uname -s`
+   for Metal. Each failure prints a per-distribution install hint, because
+   the CMake-level failure for a missing dependency is unreadable.
 
 Verified: **CPU** and **Vulkan** (Linux). **CUDA** and **Metal** are wired but
 have never been built — no hardware here. Treat their link lines as unproven.

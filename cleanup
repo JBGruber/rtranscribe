@@ -1,6 +1,7 @@
 #!/bin/sh
 rm -rf src/transcribe-cpp/build src/transcribe-cpp/install
 rm -f src/Makevars
+rm -rf conftest-spirv   # configure's SPIRV-Headers probe, if it was interrupted
 # The glue objects too: `make` treats an existing rtranscribe.so as up to date
 # and silently keeps a shared object linked against the PREVIOUS backend set,
 # which is how a GPU-enabled reinstall ends up still being the CPU build.

@@ -84,7 +84,10 @@ jobs:
       - name: Install Vulkan build and runtime dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libvulkan-dev glslc mesa-vulkan-drivers
+          # spirv-headers: ggml-vulkan does find_package(SPIRV-Headers CONFIG
+          # REQUIRED) and includes <spirv/unified1/spirv.hpp>; those ship
+          # separately from the loader on Debian/Ubuntu.
+          sudo apt-get install -y libvulkan-dev glslc spirv-headers mesa-vulkan-drivers
 
       - uses: r-lib/actions/setup-r-dependencies@v2
         with:

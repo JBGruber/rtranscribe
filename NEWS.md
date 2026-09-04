@@ -46,6 +46,7 @@ bundled sources with no external library to install.
 
   ```sh
   TRANSCRIBE_R_VULKAN=1 R CMD INSTALL .   # AMD / Intel / NVIDIA, needs glslc
+                                          # and the Vulkan + SPIR-V headers
   TRANSCRIBE_R_CUDA=1   R CMD INSTALL .   # NVIDIA, needs the CUDA toolkit
   TRANSCRIBE_R_METAL=1  R CMD INSTALL .   # Apple Silicon
   ```

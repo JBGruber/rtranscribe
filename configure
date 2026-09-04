@@ -140,17 +140,38 @@ if [ "${TRANSCRIBE_R_VULKAN:-0}" = "1" ]; then
   fi
   rm -f conftest.c conftest.o
 
-  if [ -z "$GLSLC" ] || [ "$VULKAN_HEADERS" != "1" ]; then
+  # It also does find_package(SPIRV-Headers CONFIG REQUIRED) and includes
+  # <spirv/unified1/spirv.hpp>. Those ship in their own package on most
+  # distributions, so the loader being present says nothing about them; run
+  # the same find_package CMake will, VULKAN_SDK lookup and all.
+  SPIRV_HEADERS=0
+  rm -rf conftest-spirv
+  mkdir -p conftest-spirv
+  cat > conftest-spirv/CMakeLists.txt <<'EOF'
+cmake_minimum_required(VERSION 3.16)
+project(spirv_headers_probe NONE)
+if (DEFINED ENV{VULKAN_SDK})
+  list(APPEND CMAKE_PREFIX_PATH "$ENV{VULKAN_SDK}")
+endif()
+find_package(SPIRV-Headers CONFIG REQUIRED)
+EOF
+  if "$CMAKE" -S conftest-spirv -B conftest-spirv/build >/dev/null 2>&1; then
+    SPIRV_HEADERS=1
+  fi
+  rm -rf conftest-spirv
+
+  if [ -z "$GLSLC" ] || [ "$VULKAN_HEADERS" != "1" ] || [ "$SPIRV_HEADERS" != "1" ]; then
     cat >&2 <<EOF
 ------------------------------ ERROR ------------------------------
-TRANSCRIBE_R_VULKAN=1 needs the Vulkan headers and the glslc shader
-compiler at build time.
+TRANSCRIBE_R_VULKAN=1 needs the Vulkan headers, the SPIR-V headers and
+the glslc shader compiler at build time.
   vulkan/vulkan.h found: $([ "$VULKAN_HEADERS" = "1" ] && echo yes || echo no)
+  SPIRV-Headers found:   $([ "$SPIRV_HEADERS" = "1" ] && echo yes || echo no)
   glslc found:           ${GLSLC:-no}
 
-  Debian/Ubuntu:  sudo apt-get install libvulkan-dev glslc
-  Fedora:         sudo dnf install vulkan-loader-devel glslc
-  Arch:           sudo pacman -S vulkan-headers vulkan-icd-loader shaderc
+  Debian/Ubuntu:  sudo apt-get install libvulkan-dev glslc spirv-headers
+  Fedora:         sudo dnf install vulkan-loader-devel glslc spirv-headers-devel
+  Arch:           sudo pacman -S vulkan-headers vulkan-icd-loader shaderc spirv-headers
   macOS:          the Vulkan SDK (MoltenVK) — or use TRANSCRIBE_R_METAL=1
 
 A Vulkan driver for the GPU is needed at run time as well; without one

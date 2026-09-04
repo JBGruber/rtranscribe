@@ -166,10 +166,33 @@ Some families expose knobs that do not generalise.
 They are passed with `family =` and validated against the loaded model:
 
 ```{r}
+#| eval: false
 video_f <- curl::curl_download(
   "https://www.gesis.org/fileadmin/Home/GESIS-Imagefilm_en.webm",
   "GESIS-Imagefilm_en.webm"
 )
+# Bias Whisper's decoding toward domain vocabulary
+transcribe_run(
+  s,
+  video_f,
+  family = whisper_options(
+    initial_prompt = "GESIS – Leibniz Institute for the Social Sciences "
+  )
+)
+
+transcribe_accepts_options(m, whisper_options()) # TRUE for whisper models
+```
+
+```{r}
+#| eval: true
+#| echo: false
+if (!file.exists("GESIS-Imagefilm_en.webm")) {
+  video_f <- curl::curl_download(
+    "https://www.gesis.org/fileadmin/Home/GESIS-Imagefilm_en.webm",
+    "GESIS-Imagefilm_en.webm"
+  )
+}
+video_f <- "GESIS-Imagefilm_en.webm"
 # Bias Whisper's decoding toward domain vocabulary
 transcribe_run(
   s,
@@ -203,7 +226,7 @@ Set them in `~/.Renviron` (`usethis::edit_r_environ(scope = "project")`) rather 
 pak::pak("JBGruber/rtranscribe")
 ```
 
-Each backend needs its SDK at build time — Vulkan needs the loader headers and the `glslc` shader compiler, CUDA needs the toolkit — and `configure` checks for them up front, with a per-distribution install hint if something is missing.
+Each backend needs its SDK at build time — Vulkan needs the loader headers, the SPIR-V headers and the `glslc` shader compiler, CUDA needs the toolkit — and `configure` checks for them up front, with a per-distribution install hint if something is missing.
 More than one can be enabled in the same build.
 
 Then use it:

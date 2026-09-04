@@ -46,7 +46,7 @@ res
 #> <transcribe_result>
 #> • language: "en"
 #> • timestamps: "segment"
-#> • audio: 11s (112.7x real time)
+#> • audio: 11s (132.9x real time)
 #> • 1 segment, 0 words
 #> ────────────────────────────────────────────────────────────────────────────────
 #> [00:00:00.000 -> 00:00:10.500] And so my fellow Americans ask not what your country can do for you, ask what you can do for your country.
@@ -161,7 +161,7 @@ results
 #> <transcribe_result>
 #> • language: "de"
 #> • timestamps: "segment"
-#> • audio: 29.3s (249.4x real time)
+#> • audio: 29.3s (456.7x real time)
 #> • 1 segment, 0 words
 #> ────────────────────────────────────────────────────────────────────────────────
 #> [00:00:00.000 -> 00:00:29.000] Am Strand der Bade anzug die Badehose, die Sandalen, die Luftmatratze, das Handtuch, das Eis, der Ball, die Sonne, das Meer, die Wellen,
@@ -170,7 +170,7 @@ results
 #> <transcribe_result>
 #> • language: "en"
 #> • timestamps: "segment"
-#> • audio: 11s (93.5x real time)
+#> • audio: 11s (171.3x real time)
 #> • 1 segment, 0 words
 #> ────────────────────────────────────────────────────────────────────────────────
 #> [00:00:00.000 -> 00:00:10.500] And so my fellow Americans ask not what your country can do for you, ask what you can do for your country.
@@ -222,7 +222,7 @@ transcribe_run(
 #> <transcribe_result>
 #> • language: "de"
 #> • timestamps: "segment"
-#> • audio: 29.3s (301.4x real time)
+#> • audio: 29.3s (329.9x real time)
 #> • 1 segment, 0 words
 #> ────────────────────────────────────────────────────────────────────────────────
 #> [00:00:00.000 -> 00:00:28.000] On the beach the boat train, the boat train, the sandals, the air mattress, the shower, the ice, the ball, the sun, the sea, the waves,
@@ -279,22 +279,23 @@ transcribe_run(
     initial_prompt = "GESIS – Leibniz Institute for the Social Sciences "
   )
 )
-#> <transcribe_result>
-#> • language: "en"
-#> • timestamps: "segment"
-#> • audio: 134.9s (334.2x real time)
-#> • 22 segments, 0 words
-#> ────────────────────────────────────────────────────────────────────────────────
-#> [00:00:00.000 -> 00:00:07.000] GESIS is one of the world's leading infrastructural institutions for social science research.
-#> [00:00:07.000 -> 00:00:15.000] With over 350 employees and manheim and colon, we contribute to a better understanding of our society.
-#> [00:00:15.000 -> 00:00:22.000] What attitudes and opinions do people in Germany have? What values are important to them?
-#> [00:00:22.000 -> 00:00:29.000] How has their thinking changed over time? And how does it differ from our European neighbors and worldwide?
-#> [00:00:30.000 -> 00:00:37.000] We conduct research on these questions and provide other researchers with the building blocks to carry out their own projects.
-#> ... 17 more segments
 
 transcribe_accepts_options(m, whisper_options()) # TRUE for whisper models
-#> [1] TRUE
 ```
+
+    #> <transcribe_result>
+    #> • language: "en"
+    #> • timestamps: "segment"
+    #> • audio: 134.9s (390.1x real time)
+    #> • 22 segments, 0 words
+    #> ────────────────────────────────────────────────────────────────────────────────
+    #> [00:00:00.000 -> 00:00:07.000] GESIS is one of the world's leading infrastructural institutions for social science research.
+    #> [00:00:07.000 -> 00:00:15.000] With over 350 employees and manheim and colon, we contribute to a better understanding of our society.
+    #> [00:00:15.000 -> 00:00:22.000] What attitudes and opinions do people in Germany have? What values are important to them?
+    #> [00:00:22.000 -> 00:00:29.000] How has their thinking changed over time? And how does it differ from our European neighbors and worldwide?
+    #> [00:00:30.000 -> 00:00:37.000] We conduct research on these questions and provide other researchers with the building blocks to carry out their own projects.
+    #> ... 17 more segments
+    #> [1] TRUE
 
 Also available: `parakeet_stream_options()`,
 `parakeet_buffered_stream_options()`, `moonshine_streaming_options()`
@@ -325,10 +326,10 @@ pak::pak("JBGruber/rtranscribe")
 ```
 
 Each backend needs its SDK at build time — Vulkan needs the loader
-headers and the `glslc` shader compiler, CUDA needs the toolkit — and
-`configure` checks for them up front, with a per-distribution install
-hint if something is missing. More than one can be enabled in the same
-build.
+headers, the SPIR-V headers and the `glslc` shader compiler, CUDA needs
+the toolkit — and `configure` checks for them up front, with a
+per-distribution install hint if something is missing. More than one can
+be enabled in the same build.
 
 Then use it:
 
