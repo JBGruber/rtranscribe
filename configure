@@ -50,6 +50,70 @@ EOF
   exit 1
 fi
 
+# --------------------------------------------------------------------------
+# CMake version. The vendored CMakeLists ask for 3.16, and the GPU backends
+# ask for more of their own (Vulkan 3.19, CUDA 3.18). Check up front: a cmake
+# that is too old fails inside cmake_minimum_required(), several screens into
+# the configure output, naming a file in src/transcribe-cpp rather than the
+# thing the user has to install.
+# --------------------------------------------------------------------------
+CMAKE_VERSION="$("$CMAKE" --version 2>/dev/null | sed -n '1s/.*version \([0-9][0-9.]*\).*/\1/p')"
+case "$CMAKE_VERSION" in
+  [0-9]*.[0-9]*) ;;
+  *) CMAKE_VERSION="" ;;   # unrecognised output; let CMake speak for itself
+esac
+CMAKE_MAJOR=""
+CMAKE_MINOR=""
+if [ -n "$CMAKE_VERSION" ]; then
+  CMAKE_MAJOR="${CMAKE_VERSION%%.*}"
+  CMAKE_MINOR="${CMAKE_VERSION#*.}"
+  CMAKE_MINOR="${CMAKE_MINOR%%.*}"
+fi
+
+cmake_at_least() {
+  # $1 = major, $2 = minor. True when the located cmake is at least that.
+  if [ -z "$CMAKE_MAJOR" ]; then
+    return 0
+  fi
+  if [ "$CMAKE_MAJOR" -gt "$1" ]; then
+    return 0
+  fi
+  if [ "$CMAKE_MAJOR" -lt "$1" ]; then
+    return 1
+  fi
+  if [ "$CMAKE_MINOR" -ge "$2" ]; then
+    return 0
+  fi
+  return 1
+}
+
+cmake_too_old() {
+  # $1 = required version, $2 = trailing clause naming who requires it
+  cat >&2 <<EOF
+------------------------------ ERROR ------------------------------
+cmake $1 or newer is required$2, but
+  $CMAKE
+reports version ${CMAKE_VERSION}.
+
+  Debian/Ubuntu:  sudo apt-get install cmake
+  Fedora:         sudo dnf install cmake
+  Arch:           sudo pacman -S cmake
+  macOS:          brew install cmake
+
+Distributions that only ship an older cmake still have current builds
+at https://cmake.org/download/ and on PyPI ('pip install cmake'). Point
+the build at one with:
+
+  CMAKE=/path/to/cmake R CMD INSTALL .
+-------------------------------------------------------------------
+EOF
+  exit 1
+}
+
+if ! cmake_at_least 3 16; then
+  cmake_too_old "3.16" ""
+fi
+
 VENDOR="src/transcribe-cpp"
 BUILD="${VENDOR}/build"
 PREFIX="${PWD}/${VENDOR}/install"
@@ -128,6 +192,10 @@ EOF
 if [ "${TRANSCRIBE_R_VULKAN:-0}" = "1" ]; then
   require_backend_sources TRANSCRIBE_R_VULKAN ggml-vulkan
 
+  if ! cmake_at_least 3 19; then
+    cmake_too_old "3.19" " by the Vulkan backend"
+  fi
+
   # ggml-vulkan's CMake does find_package(Vulkan COMPONENTS glslc REQUIRED) and
   # compiles its shaders with glslc at build time, so both the loader headers
   # and the compiler must be present. Probe here rather than letting CMake fail
@@ -187,6 +255,10 @@ fi
 
 if [ "${TRANSCRIBE_R_CUDA:-0}" = "1" ]; then
   require_backend_sources TRANSCRIBE_R_CUDA ggml-cuda
+
+  if ! cmake_at_least 3 18; then
+    cmake_too_old "3.18" " by the CUDA backend"
+  fi
 
   NVCC="${CUDACXX:-$(command -v nvcc 2>/dev/null || true)}"
   if [ -z "$NVCC" ]; then
