@@ -167,22 +167,12 @@ They are passed with `family =` and validated against the loaded model:
 
 ```{r}
 #| eval: false
+# Get a file for transcription
 video_f <- curl::curl_download(
   "https://www.gesis.org/fileadmin/Home/GESIS-Imagefilm_en.webm",
   "GESIS-Imagefilm_en.webm"
 )
-# Bias Whisper's decoding toward domain vocabulary
-transcribe_run(
-  s,
-  video_f,
-  family = whisper_options(
-    initial_prompt = "GESIS – Leibniz Institute for the Social Sciences "
-  )
-)
-
-transcribe_accepts_options(m, whisper_options()) # TRUE for whisper models
 ```
-
 ```{r}
 #| eval: true
 #| echo: false
@@ -193,6 +183,9 @@ if (!file.exists("GESIS-Imagefilm_en.webm")) {
   )
 }
 video_f <- "GESIS-Imagefilm_en.webm"
+```
+
+```{r}
 # Bias Whisper's decoding toward domain vocabulary
 transcribe_run(
   s,
