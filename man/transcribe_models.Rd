@@ -9,7 +9,7 @@ transcribe_models(refresh = FALSE)
 \arguments{
 \item{refresh}{Whether to query Hugging Face for the full catalogue.
 Requires the \code{httr2} package and a network connection. On failure the
-curated list is returned with a warning.}
+locally known models are returned with a warning.}
 }
 \value{
 A tibble with one row per known model: its name, family, download
@@ -17,7 +17,9 @@ size, published word error rate, whether it is already cached, and a note.
 }
 \description{
 By default this is a small curated set of GGUF models to get started with,
-annotated with download size, published word error rate and a short note.
+annotated with download size, published word error rate and a short note,
+plus anything a previous \code{refresh = TRUE} has added: the refreshed catalogue
+is cached in \code{\link[=transcribe_cache_dir]{transcribe_cache_dir()}} and re-read in later sessions.
 }
 \details{
 With \code{refresh = TRUE} the full catalogue published under
@@ -27,6 +29,10 @@ at the bottom. Those extra rows carry only a name -- \code{family}, \code{size_m
 \code{wer} and \code{note} are \code{NA}, because the listing API does not report them and
 the repository tags are not a safe substitute. Read the authoritative
 architecture with \code{\link[=transcribe_model_info]{transcribe_model_info()}} after downloading.
+
+Refreshing by hand is rarely necessary: \code{\link[=transcribe_download_model]{transcribe_download_model()}} fetches
+the catalogue itself when it is handed a name it does not recognise. Use it
+to see the full list, or to pick up models published since the last refresh.
 
 Either way this list is a convenience, not a limit: any \code{.gguf} converted
 for transcribe.cpp works with \code{\link[=transcribe_load_model]{transcribe_load_model()}}.

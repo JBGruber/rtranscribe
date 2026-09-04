@@ -42,7 +42,8 @@ Suggests:
     curl,
     httr2,
     methods,
-    testthat (>= 3.0.0)
+    testthat (>= 3.0.0),
+    withr
 SystemRequirements: cmake (>= 3.16), C++17, GNU make; optionally the Vulkan
     headers, the SPIR-V headers and glslc (for TRANSCRIBE_R_VULKAN=1) or the
     CUDA toolkit (for TRANSCRIBE_R_CUDA=1)

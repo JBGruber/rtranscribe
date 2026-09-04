@@ -5,8 +5,9 @@
 # rates are the values upstream publishes in docs/models/, and `family` is the
 # transcribe.cpp architecture name (which is what the *_options() helpers key
 # off). Every family ships more variants and more quantisations than are listed
-# here -- see transcribe_models(refresh = TRUE) for the full catalogue, and note
-# that any .gguf converted for transcribe.cpp can be passed to
+# here -- see transcribe_models(refresh = TRUE) for the full catalogue (which
+# transcribe_download_model() also consults on its own for an unknown name), and
+# note that any .gguf converted for transcribe.cpp can be passed to
 # transcribe_load_model() directly.
 transcribe_registry <- tibble::tibble(
   name = c(
@@ -138,10 +139,98 @@ transcribe_cache_dir <- function() {
   tools::R_user_dir("rtranscribe", "cache")
 }
 
+# Refreshed catalogue ---------------------------------------------------------
+
+#' Where a refreshed catalogue is kept between sessions
+#'
+#' Next to the models themselves, so that clearing the cache directory clears
+#' the catalogue with it.
+#' @noRd
+registry_cache_file <- function() {
+  file.path(transcribe_cache_dir(), "model-catalogue.rds")
+}
+
+#' Append extra rows below the curated ones, dropping duplicates
+#'
+#' The curated annotations always win, so a stale cached catalogue can never
+#' mask an updated built-in entry.
+#' @noRd
+registry_merge <- function(extra) {
+  reg <- transcribe_registry
+  if (!is.data.frame(extra) || nrow(extra) == 0 || !all(names(reg) %in% names(extra))) {
+    return(reg)
+  }
+  extra <- extra[!extra$name %in% reg$name, names(reg), drop = FALSE]
+  rbind(reg, extra)
+}
+
+#' Every model we currently know about: curated plus previously refreshed
+#'
+#' The on-disk catalogue is read once per session, so a name that only exists
+#' in the full Hugging Face listing stays resolvable in later sessions without
+#' another refresh.
+#' @noRd
+known_registry <- function() {
+  if (!is.null(the$registry)) {
+    return(the$registry)
+  }
+  cached <- tryCatch(
+    {
+      f <- registry_cache_file()
+      if (file.exists(f)) readRDS(f) else NULL
+    },
+    error = function(e) NULL
+  )
+  the$registry <- registry_merge(cached)
+  the$registry
+}
+
+#' Fetch the full catalogue and remember it, for this session and on disk
+#'
+#' @param warn Whether to warn when the fetch fails. The automatic refresh in
+#'   [transcribe_download_model()] stays quiet, because its own error message
+#'   follows immediately.
+#' @noRd
+registry_refresh <- function(warn = TRUE) {
+  extra <- tryCatch(
+    hf_gguf_models(),
+    error = function(e) {
+      if (warn) {
+        cli::cli_warn(c(
+          "Could not fetch the model list from Hugging Face.",
+          "x" = conditionMessage(e),
+          "i" = "Returning the models already known locally."
+        ))
+      }
+      NULL
+    }
+  )
+  # Even a failed attempt counts: one refresh per session is enough.
+  the$refreshed <- TRUE
+  if (is.null(extra) || nrow(extra) == 0) {
+    return(known_registry())
+  }
+
+  reg <- registry_merge(extra)
+  the$registry <- reg
+  tryCatch(
+    {
+      f <- registry_cache_file()
+      dir.create(dirname(f), recursive = TRUE, showWarnings = FALSE)
+      saveRDS(reg, f)
+    },
+    # The cache is a convenience; an unwritable one must not fail the call.
+    error = function(e) NULL
+  )
+  reg
+}
+
 #' List models known to the package
 #'
 #' By default this is a small curated set of GGUF models to get started with,
-#' annotated with download size, published word error rate and a short note.
+#' annotated with download size, published word error rate and a short note,
+#' plus anything a previous `refresh = TRUE` has added: the refreshed catalogue
+#' is cached in [transcribe_cache_dir()] and re-read in later sessions.
 #'
 #' With `refresh = TRUE` the full catalogue published under
 #' [handy-computer](https://huggingface.co/handy-computer) is fetched from the
@@ -151,12 +240,16 @@ transcribe_cache_dir <- function() {
 #' the repository tags are not a safe substitute. Read the authoritative
 #' architecture with [transcribe_model_info()] after downloading.
 #'
+#' Refreshing by hand is rarely necessary: [transcribe_download_model()] fetches
+#' the catalogue itself when it is handed a name it does not recognise. Use it
+#' to see the full list, or to pick up models published since the last refresh.
+#'
 #' Either way this list is a convenience, not a limit: any `.gguf` converted
 #' for transcribe.cpp works with [transcribe_load_model()].
 #'
 #' @param refresh Whether to query Hugging Face for the full catalogue.
 #'   Requires the `httr2` package and a network connection. On failure the
-#'   curated list is returned with a warning.
+#'   locally known models are returned with a warning.
 #'
 #' @return A tibble with one row per known model: its name, family, download
 #'   size, published word error rate, whether it is already cached, and a note.
@@ -169,29 +262,7 @@ transcribe_cache_dir <- function() {
 #'
 #' @export
 transcribe_models <- function(refresh = FALSE) {
-  reg <- transcribe_registry
-
-  if (isTRUE(refresh)) {
-    extra <- tryCatch(
-      hf_gguf_models(),
-      error = function(e) {
-        cli::cli_warn(c(
-          "Could not fetch the model list from Hugging Face.",
-          "x" = conditionMessage(e),
-          "i" = "Returning the built-in list only."
-        ))
-        NULL
-      }
-    )
-    if (!is.null(extra) && nrow(extra) > 0) {
-      extra <- extra[!extra$name %in% reg$name, , drop = FALSE]
-      reg <- rbind(reg, extra)
-    }
-  }
-
-  # Remember what we know about, so transcribe_download_model() can resolve a
-  # name that only exists in the refreshed catalogue.
-  the$registry <- reg
+  reg <- if (isTRUE(refresh)) registry_refresh() else known_registry()
 
   cache <- transcribe_cache_dir()
   reg$downloaded <- file.exists(file.path(cache, reg$file))
@@ -201,7 +272,7 @@ transcribe_models <- function(refresh = FALSE) {
 #' Look up one registry entry by name, across curated and refreshed models
 #' @noRd
 model_entry <- function(name) {
-  reg <- the$registry %||% transcribe_registry
+  reg <- known_registry()
   hit <- reg[reg$name == name, , drop = FALSE]
   if (nrow(hit) == 0) {
     return(NULL)
@@ -209,10 +280,34 @@ model_entry <- function(name) {
   as.list(hit[1, ])
 }
 
+#' Refresh the catalogue once per session, then look the name up again
+#'
+#' Returns `NULL` when the name is still unknown afterwards, or when there is
+#' nothing left to try: no `httr2`, or a refresh already happened.
+#' @noRd
+model_entry_refreshed <- function(name, quiet = FALSE) {
+  if (isTRUE(the$refreshed) || !requireNamespace("httr2", quietly = TRUE)) {
+    return(NULL)
+  }
+  if (!quiet) {
+    cli::cli_alert_info(
+      "{.val {name}} is not in the model list; checking the full catalogue."
+    )
+  }
+  registry_refresh(warn = FALSE)
+  model_entry(name)
+}
+
 #' Download a model
 #'
 #' Downloads a GGUF model into the package cache and returns its path. A model
 #' that is already present is not re-downloaded unless `overwrite = TRUE`.
+#'
+#' A name that is not in the curated list is looked up in the full
+#' [handy-computer](https://huggingface.co/handy-computer) catalogue (once per
+#' session, and only if `httr2` is installed) before it is rejected, so the
+#' newer models listed by `transcribe_models(refresh = TRUE)` can be used
+#' straight away.
 #'
 #' @param name Either a name from [transcribe_models()], or a direct URL to a
 #'   `.gguf` file.
@@ -241,6 +336,12 @@ transcribe_download_model <- function(
   }
 
   entry <- model_entry(name)
+  if (is.null(entry) && !grepl("^https?://", name)) {
+    # The name may simply be newer than the curated list, so consult the full
+    # catalogue before deciding it does not exist.
+    entry <- model_entry_refreshed(name, quiet = quiet)
+  }
+
   if (!is.null(entry)) {
     url <- sprintf(
       "https://huggingface.co/%s/resolve/main/%s",
@@ -261,9 +362,11 @@ transcribe_download_model <- function(
   } else {
     cli::cli_abort(c(
       "Unknown model {.val {name}}.",
-      "i" = "See {.fn transcribe_models} for the curated names, or pass a direct URL.",
-      "i" = "If it is another {.field handy-computer} model, run
-             {.code transcribe_models(refresh = TRUE)} first to make it resolvable."
+      "i" = "See {.fn transcribe_models} for the known names, or pass a direct URL.",
+      if (!requireNamespace("httr2", quietly = TRUE)) {
+        c("i" = "The full {.field handy-computer} catalogue could not be searched:
+                 install {.pkg httr2} with {.run install.packages(\"httr2\")}.")
+      }
     ))
   }
 

@@ -61,3 +61,36 @@ sample_audio <- function(name = "jfk.wav") {
   testthat::skip_if_not_installed("av")
   transcribe_read_audio(wav)
 }
+
+# The catalogue of known models is remembered both in the session environment
+# and in the cache directory, so tests that touch it need a private copy of
+# both -- otherwise they see (and write to) the user's real cache.
+forget_registry <- function() {
+  the <- rtranscribe:::the
+  rm(
+    list = intersect(c("registry", "refreshed"), ls(the)),
+    envir = the
+  )
+}
+
+local_model_cache <- function(env = parent.frame()) {
+  dir <- withr::local_tempdir(.local_envir = env)
+  withr::local_envvar(c(RTRANSCRIBE_CACHE = dir), .local_envir = env)
+  forget_registry()
+  withr::defer(forget_registry(), envir = env)
+  dir
+}
+
+# A stand-in for the Hugging Face listing: one model already curated, one that
+# only the full catalogue knows about.
+fake_catalogue <- function() {
+  tibble::tibble(
+    name = c("whisper-tiny", "brand-new-model"),
+    repo = c("handy-computer/whisper-tiny-gguf", "handy-computer/brand-new-model-gguf"),
+    file = c("whisper-tiny-Q8_0.gguf", "brand-new-model-Q8_0.gguf"),
+    family = NA_character_,
+    size_mb = NA_real_,
+    wer = NA_real_,
+    note = NA_character_
+  )
+}

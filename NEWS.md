@@ -27,6 +27,10 @@ bundled sources with no external library to install.
 
 * `transcribe_download_model()` and `transcribe_models()` fetch and list a
   small curated registry; any GGUF converted for transcribe.cpp also works.
+* A name outside the curated set makes `transcribe_download_model()` consult
+  the full Hugging Face catalogue itself, and `transcribe_models(refresh =
+  TRUE)` caches that catalogue in `transcribe_cache_dir()`, so refreshed names
+  keep resolving in later sessions.
 * `transcribe_capabilities()`, `transcribe_supports()` and
   `transcribe_model_info()` report what a loaded model can do.
 

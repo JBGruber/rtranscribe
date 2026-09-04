@@ -32,6 +32,13 @@ The path to the downloaded file, invisibly.
 Downloads a GGUF model into the package cache and returns its path. A model
 that is already present is not re-downloaded unless \code{overwrite = TRUE}.
 }
+\details{
+A name that is not in the curated list is looked up in the full
+\href{https://huggingface.co/handy-computer}{handy-computer} catalogue (once per
+session, and only if \code{httr2} is installed) before it is rejected, so the
+newer models listed by \code{transcribe_models(refresh = TRUE)} can be used
+straight away.
+}
 \examples{
 \dontshow{if (FALSE) withAutoprint(\{ # examplesIf}
 path <- transcribe_download_model("whisper-tiny")

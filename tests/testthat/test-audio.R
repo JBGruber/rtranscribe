@@ -86,6 +86,8 @@ test_that("the model registry is a static tibble, not a function", {
 })
 
 test_that("transcribe_models() returns the curated set by default", {
+  local_model_cache()
+
   m <- transcribe_models()
   expect_s3_class(m, "tbl_df")
   expect_gt(nrow(m), 0)
@@ -95,10 +97,14 @@ test_that("transcribe_models() returns the curated set by default", {
 })
 
 test_that("unknown model names are rejected before any download", {
-  expect_error(transcribe_download_model("not-a-model"), "Unknown model")
+  local_model_cache()
+  local_mocked_bindings(hf_gguf_models = function(...) stop("no network"))
+
+  expect_error(transcribe_download_model("not-a-model", quiet = TRUE), "Unknown model")
 })
 
 test_that("a failed refresh warns and falls back to the curated set", {
+  local_model_cache()
   local_mocked_bindings(
     hf_gguf_models = function(...) stop("no network")
   )
@@ -107,13 +113,8 @@ test_that("a failed refresh warns and falls back to the curated set", {
 })
 
 test_that("refresh appends unannotated rows below the curated ones", {
-  fake <- tibble::tibble(
-    name = c("whisper-tiny", "brand-new-model"), # first one is already curated
-    repo = c("handy-computer/whisper-tiny-gguf", "handy-computer/brand-new-model-gguf"),
-    file = c("whisper-tiny-Q8_0.gguf", "brand-new-model-Q8_0.gguf"),
-    family = NA_character_, size_mb = NA_real_, wer = NA_real_, note = NA_character_
-  )
-  local_mocked_bindings(hf_gguf_models = function(...) fake)
+  local_model_cache()
+  local_mocked_bindings(hf_gguf_models = function(...) fake_catalogue())
 
   curated <- transcribe_models()
   m <- transcribe_models(refresh = TRUE)
@@ -133,6 +134,7 @@ test_that("refresh appends unannotated rows below the curated ones", {
 })
 
 test_that("refresh reaches the real catalogue", {
+  local_model_cache()
   skip_on_cran()
   skip_if_offline()
   skip_if_not_installed("httr2")
@@ -142,4 +144,51 @@ test_that("refresh reaches the real catalogue", {
   expect_equal(anyDuplicated(m$name), 0L)
   # Curated rows keep their annotations
   expect_false(is.na(m$note[m$name == "whisper-tiny"]))
+})
+
+test_that("a refreshed catalogue is still known in the next session", {
+  dir <- local_model_cache()
+  local_mocked_bindings(hf_gguf_models = function(...) fake_catalogue())
+
+  transcribe_models(refresh = TRUE)
+  expect_true(file.exists(file.path(dir, "model-catalogue.rds")))
+
+  # Start over with an empty session environment, but the same cache directory.
+  forget_registry()
+
+  expect_true("brand-new-model" %in% transcribe_models()$name)
+  expect_equal(
+    rtranscribe:::model_entry("brand-new-model")$repo,
+    "handy-computer/brand-new-model-gguf"
+  )
+})
+
+test_that("an unknown name is looked up in the catalogue before it is rejected", {
+  skip_if_not_installed("httr2")
+  dir <- local_model_cache()
+  local_mocked_bindings(hf_gguf_models = function(...) fake_catalogue())
+
+  # The reported case: the model is already downloaded, but its name is only in
+  # the full catalogue, so nothing should have to be fetched to find it.
+  cached <- file.path(dir, "brand-new-model-Q8_0.gguf")
+  writeBin(as.raw(0), cached)
+
+  expect_equal(
+    transcribe_download_model("brand-new-model", quiet = TRUE),
+    cached
+  )
+})
+
+test_that("the automatic catalogue lookup happens at most once per session", {
+  skip_if_not_installed("httr2")
+  local_model_cache()
+  calls <- 0L
+  local_mocked_bindings(hf_gguf_models = function(...) {
+    calls <<- calls + 1L
+    fake_catalogue()
+  })
+
+  expect_error(transcribe_download_model("no-such-model", quiet = TRUE), "Unknown model")
+  expect_error(transcribe_download_model("also-not-a-model", quiet = TRUE), "Unknown model")
+  expect_equal(calls, 1L)
 })

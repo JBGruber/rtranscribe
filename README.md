@@ -47,7 +47,7 @@ res
 #> <transcribe_result>
 #> • language: "en"
 #> • timestamps: "segment"
-#> • audio: 11s (112.4x real time)
+#> • audio: 11s (113.3x real time)
 #> • 1 segment, 0 words
 #> ────────────────────────────────────────────────────────────────────────────────
 #> [00:00:00.000 -> 00:00:10.500] And so my fellow Americans ask not what your country can do for you, ask what you can do for your country.
@@ -83,15 +83,20 @@ numeric vector of 16 kHz mono PCM directly.
 
 ``` r
 transcribe_models()
-#> # A tibble: 6 × 6
-#>   name                     family              size_mb   wer downloaded note    
-#>   <chr>                    <chr>                 <dbl> <dbl> <lgl>      <chr>   
-#> 1 whisper-tiny             whisper                  44  7.53 TRUE       Smalles…
-#> 2 whisper-tiny.en          whisper                  44  5.72 FALSE      English…
-#> 3 whisper-base             whisper                  81  5.12 TRUE       Multili…
-#> 4 whisper-large-v3-turbo   whisper                 845  2.01 TRUE       Best ge…
-#> 5 parakeet-tdt-0.6b-v3     parakeet                740  1.94 TRUE       Fast tr…
-#> 6 moonshine-streaming-tiny moonshine_streaming      48  4.52 TRUE       Small s…
+#> # A tibble: 70 × 6
+#>    name                     family              size_mb   wer downloaded note   
+#>    <chr>                    <chr>                 <dbl> <dbl> <lgl>      <chr>  
+#>  1 whisper-tiny             whisper                  44  7.53 TRUE       Smalle…
+#>  2 whisper-tiny.en          whisper                  44  5.72 FALSE      Englis…
+#>  3 whisper-base             whisper                  81  5.12 TRUE       Multil…
+#>  4 whisper-large-v3-turbo   whisper                 845  2.01 TRUE       Best g…
+#>  5 parakeet-tdt-0.6b-v3     parakeet                740  1.94 TRUE       Fast t…
+#>  6 moonshine-streaming-tiny moonshine_streaming      48  4.52 TRUE       Small …
+#>  7 Breeze-ASR-25            <NA>                     NA NA    FALSE      <NA>   
+#>  8 canary-180m-flash        <NA>                     NA NA    FALSE      <NA>   
+#>  9 canary-1b                <NA>                     NA NA    FALSE      <NA>   
+#> 10 canary-1b-flash          <NA>                     NA NA    FALSE      <NA>   
+#> # ℹ 60 more rows
 ```
 
 That is a curated shortlist. `refresh = TRUE` fetches the full catalogue
@@ -121,8 +126,12 @@ size, WER or the transcribe.cpp architecture, and the repository tags
 are not a safe substitute (`moonshine-streaming-*` is tagged
 `moonshine`, but its family is `moonshine_streaming`). Read the
 authoritative architecture with `transcribe_model_info()` after
-downloading. Once refreshed, any listed name can be passed to
-`transcribe_download_model()`.
+downloading. The refreshed catalogue is cached in
+`transcribe_cache_dir()`, so later sessions list it without another API
+call, and a name that is not in the curated set makes
+`transcribe_download_model()` check the catalogue by itself before
+giving up – refreshing by hand is only needed to browse the list or to
+pick up newly published models.
 
 This is a convenience, not a limit: any GGUF converted for
 transcribe.cpp works. Browse the catalogue at
@@ -163,7 +172,7 @@ results
 #> <transcribe_result>
 #> • language: "de"
 #> • timestamps: "segment"
-#> • audio: 29.3s (260.4x real time)
+#> • audio: 29.3s (259.6x real time)
 #> • 1 segment, 0 words
 #> ────────────────────────────────────────────────────────────────────────────────
 #> [00:00:00.000 -> 00:00:29.000] Am Strand der Bade anzug die Badehose, die Sandalen, die Luftmatratze, das Handtuch, das Eis, der Ball, die Sonne, das Meer, die Wellen,
@@ -172,7 +181,7 @@ results
 #> <transcribe_result>
 #> • language: "en"
 #> • timestamps: "segment"
-#> • audio: 11s (97.7x real time)
+#> • audio: 11s (97.4x real time)
 #> • 1 segment, 0 words
 #> ────────────────────────────────────────────────────────────────────────────────
 #> [00:00:00.000 -> 00:00:10.500] And so my fellow Americans ask not what your country can do for you, ask what you can do for your country.
@@ -188,8 +197,7 @@ attribution needs a model trained for it.
 
 ``` r
 # Word-level timings: Parakeet times every token, so "word" is available
-pm <- transcribe_download_model("parakeet-tdt-0.6b-v3") |>
-  transcribe_load_model()
+pm <- transcribe_load_model("parakeet-tdt-0.6b-v3")
 #> ✔ Using cached model '/home/johannes/.cache/R/rtranscribe/parakeet-tdt-0.6b-v3-Q8_0.gguf'.
 ps <- transcribe_session(pm, n_threads = 8)
 res <- transcribe_run(ps, jfk_file, timestamps = "word")
@@ -211,8 +219,7 @@ res$words
 
 # Translate into English. Note the model: the turbo distillation dropped the
 # translate task, so this needs a plain multilingual whisper.
-tm <- transcribe_download_model("whisper-base") |>
-  transcribe_load_model()
+tm <- transcribe_load_model("whisper-base")
 #> ✔ Using cached model '/home/johannes/.cache/R/rtranscribe/whisper-base-Q8_0.gguf'.
 german_file <- system.file("extdata", "german.wav", package = "rtranscribe")
 transcribe_run(
@@ -224,7 +231,7 @@ transcribe_run(
 #> <transcribe_result>
 #> • language: "de"
 #> • timestamps: "segment"
-#> • audio: 29.3s (291.7x real time)
+#> • audio: 29.3s (320.2x real time)
 #> • 1 segment, 0 words
 #> ────────────────────────────────────────────────────────────────────────────────
 #> [00:00:00.000 -> 00:00:28.000] On the beach the boat train, the boat train, the sandals, the air mattress, the shower, the ice, the ball, the sun, the sea, the waves,
@@ -232,8 +239,7 @@ transcribe_run(
 
 ``` r
 # Speaker attribution, on a model that advertises it
-dm <- transcribe_download_model("moss-transcribe-diarize") |>
-  transcribe_load_model()
+dm <- transcribe_load_model("moss-transcribe-diarize")
 res <- transcribe_run(transcribe_session(dm), "meeting.wav", diarize = TRUE)
 res$speakers
 res$segments$speaker_id
@@ -288,7 +294,7 @@ transcribe_run(
 #> <transcribe_result>
 #> • language: "en"
 #> • timestamps: "segment"
-#> • audio: 134.9s (327.5x real time)
+#> • audio: 134.9s (327.2x real time)
 #> • 22 segments, 0 words
 #> ────────────────────────────────────────────────────────────────────────────────
 #> [00:00:00.000 -> 00:00:07.000] GESIS is one of the world's leading infrastructural institutions for social science research.

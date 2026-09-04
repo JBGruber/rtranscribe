@@ -78,7 +78,7 @@ transcribe_models(refresh = TRUE)
 
 The appended rows carry only a name: the listing API does not report size, WER or the transcribe.cpp architecture, and the repository tags are not a safe substitute (`moonshine-streaming-*` is tagged `moonshine`, but its family is `moonshine_streaming`).
 Read the authoritative architecture with `transcribe_model_info()` after downloading.
-Once refreshed, any listed name can be passed to `transcribe_download_model()`.
+The refreshed catalogue is cached in `transcribe_cache_dir()`, so later sessions list it without another API call, and a name that is not in the curated set makes `transcribe_download_model()` check the catalogue by itself before giving up -- refreshing by hand is only needed to browse the list or to pick up newly published models.
 
 This is a convenience, not a limit: any GGUF converted for transcribe.cpp works.
 Browse the catalogue at [huggingface.co/handy-computer](https://huggingface.co/handy-computer) and pass a path or URL directly.
@@ -120,16 +120,14 @@ Whisper tops out at segment timestamps; Parakeet resolves timings per token but 
 
 ```{r}
 # Word-level timings: Parakeet times every token, so "word" is available
-pm <- transcribe_download_model("parakeet-tdt-0.6b-v3") |>
-  transcribe_load_model()
+pm <- transcribe_load_model("parakeet-tdt-0.6b-v3")
 ps <- transcribe_session(pm, n_threads = 8)
 res <- transcribe_run(ps, jfk_file, timestamps = "word")
 res$words
 
 # Translate into English. Note the model: the turbo distillation dropped the
 # translate task, so this needs a plain multilingual whisper.
-tm <- transcribe_download_model("whisper-base") |>
-  transcribe_load_model()
+tm <- transcribe_load_model("whisper-base")
 german_file <- system.file("extdata", "german.wav", package = "rtranscribe")
 transcribe_run(
   transcribe_session(tm),
@@ -141,8 +139,7 @@ transcribe_run(
 
 ```r
 # Speaker attribution, on a model that advertises it
-dm <- transcribe_download_model("moss-transcribe-diarize") |>
-  transcribe_load_model()
+dm <- transcribe_load_model("moss-transcribe-diarize")
 res <- transcribe_run(transcribe_session(dm), "meeting.wav", diarize = TRUE)
 res$speakers
 res$segments$speaker_id

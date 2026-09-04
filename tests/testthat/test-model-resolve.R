@@ -51,6 +51,10 @@ test_that("path-shaped arguments are missing files, not model names", {
 })
 
 test_that("an unknown bare name reports the registry, not a missing file", {
+  # The name is looked up in the full catalogue first, so keep that offline.
+  local_model_cache()
+  local_mocked_bindings(hf_gguf_models = function(...) stop("no network"))
+
   expect_error(
     rtranscribe:::resolve_model_path("whisper-enormous"),
     "Unknown model"
