@@ -10,14 +10,22 @@
 # transcribe_load_model() directly.
 transcribe_registry <- tibble::tibble(
   name = c(
-    "whisper-tiny", "whisper-tiny.en", "whisper-base",
-    "whisper-large-v3-turbo", "parakeet-tdt-0.6b-v3", "moonshine-streaming-tiny"
+    "whisper-tiny",
+    "whisper-tiny.en",
+    "whisper-base",
+    "whisper-large-v3-turbo",
+    "parakeet-tdt-0.6b-v3",
+    "moonshine-streaming-tiny"
   ),
   repo = paste0("handy-computer/", name, "-gguf"),
   file = paste0(name, "-Q8_0.gguf"),
   family = c(
-    "whisper", "whisper", "whisper",
-    "whisper", "parakeet", "moonshine_streaming"
+    "whisper",
+    "whisper",
+    "whisper",
+    "whisper",
+    "parakeet",
+    "moonshine_streaming"
   ),
   size_mb = c(44, 44, 81, 845, 740, 48),
   wer = c(7.53, 5.72, 5.12, 2.01, 1.94, 4.52),
@@ -59,11 +67,15 @@ hf_gguf_models <- function(user = "handy-computer", quant = "Q8_0") {
   repeat {
     resp <- httr2::req_perform(req)
     page <- httr2::resp_body_json(resp)
-    if (length(page) == 0) break
+    if (length(page) == 0) {
+      break
+    }
     models <- c(models, page)
     # The listing is cursor-paginated through a Link header.
     nxt <- httr2::resp_link_url(resp, "next")
-    if (is.null(nxt)) break
+    if (is.null(nxt)) {
+      break
+    }
     req <- httr2::req_user_agent(httr2::request(nxt), ua)
   }
 
@@ -207,6 +219,8 @@ model_entry <- function(name) {
 #' @param dest Destination directory. Defaults to [transcribe_cache_dir()].
 #' @param overwrite Re-download even if the file already exists.
 #' @param quiet Suppress progress output.
+#' @param ask If the model needs to be downloaded, ask the user to confirm
+#'   the download first.
 #'
 #' @return The path to the downloaded file, invisibly.
 #'
@@ -215,17 +229,24 @@ model_entry <- function(name) {
 #' m <- transcribe_load_model(path)
 #'
 #' @export
-transcribe_download_model <- function(name,
-                                      dest = transcribe_cache_dir(),
-                                      overwrite = FALSE,
-                                      quiet = FALSE) {
+transcribe_download_model <- function(
+  name,
+  dest = transcribe_cache_dir(),
+  overwrite = FALSE,
+  quiet = FALSE,
+  ask = FALSE
+) {
   if (!is.character(name) || length(name) != 1L || is.na(name)) {
     cli::cli_abort("{.arg name} must be a single model name or URL.")
   }
 
   entry <- model_entry(name)
   if (!is.null(entry)) {
-    url <- sprintf("https://huggingface.co/%s/resolve/main/%s", entry$repo, entry$file)
+    url <- sprintf(
+      "https://huggingface.co/%s/resolve/main/%s",
+      entry$repo,
+      entry$file
+    )
     file <- entry$file
     size_mb <- entry$size_mb
   } else if (grepl("^https?://", name)) {
@@ -233,7 +254,9 @@ transcribe_download_model <- function(name,
     file <- basename(sub("\\?.*$", "", url))
     size_mb <- NA_real_
     if (!grepl("\\.gguf$", file)) {
-      cli::cli_warn("URL does not end in {.file .gguf}; downloading anyway as {.file {file}}.")
+      cli::cli_warn(
+        "URL does not end in {.file .gguf}; downloading anyway as {.file {file}}."
+      )
     }
   } else {
     cli::cli_abort(c(
@@ -248,8 +271,17 @@ transcribe_download_model <- function(name,
   target <- file.path(dest, file)
 
   if (file.exists(target) && !overwrite) {
-    if (!quiet) cli::cli_alert_success("Using cached model {.path {target}}.")
+    if (!quiet) {
+      cli::cli_alert_success("Using cached model {.path {target}}.")
+    }
     return(invisible(target))
+  } else if (ask) {
+    cli::cli_alert_info("Do you want to download {.val {name}}?")
+    if (!isTRUE(utils::askYesNo(msg = NULL, default = TRUE))) {
+      cli::cli_abort(
+        "Use {.help transcribe_download_model} to download {.val {name}}"
+      )
+    }
   }
 
   if (!quiet) {
@@ -283,6 +315,35 @@ transcribe_download_model <- function(name,
   }
 
   file.rename(tmp, target)
-  if (!quiet) cli::cli_alert_success("Saved {.path {target}}.")
+  if (!quiet) {
+    cli::cli_alert_success("Saved {.path {target}}.")
+  }
   invisible(target)
+}
+
+#' Resolve a model argument to a path on disk
+#'
+#' Shared by [transcribe_load_model()] and [transcribe()]. An existing file is
+#' used as is; a bare model name is fetched with [transcribe_download_model()]
+#' after asking; anything else that looks like a path is a typo rather than a
+#' name, and is reported as a missing file.
+#' @noRd
+resolve_model_path <- function(path, arg = "path") {
+  if (!is.character(path) || length(path) != 1L || is.na(path)) {
+    cli::cli_abort("{.arg {arg}} must be a single file path.")
+  }
+  path <- path.expand(path)
+  if (file.exists(path)) {
+    return(path)
+  }
+  is_path <- grepl("/", path, fixed = TRUE) ||
+    grepl("\\", path, fixed = TRUE) ||
+    grepl("\\.gguf$", path)
+  if (is_path) {
+    cli::cli_abort(c(
+      "Model file not found: {.path {path}}.",
+      "i" = "Use {.fn transcribe_download_model} to fetch a model, or pass a path to your own {.file .gguf} file."
+    ))
+  }
+  transcribe_download_model(path, ask = TRUE)
 }

@@ -33,12 +33,13 @@ remotes::install_github("JBGruber/rtranscribe")
 library(rtranscribe)
 
 # Fetch a small model (44 MB) into the package cache
-model <- transcribe_download_model("whisper-tiny")
+model_file <- transcribe_download_model("whisper-tiny")
 #> ✔ Using cached model '/home/johannes/.cache/R/rtranscribe/whisper-tiny-Q8_0.gguf'.
 
 # Transcribe (uses a small audio file included in the package)
 jfk_file <- system.file("extdata", "jfk.wav", package = "rtranscribe")
-res <- transcribe(jfk_file, model)
+res <- transcribe(jfk_file, model_file)
+# OR: res <- transcribe(jfk_file, "whisper-tiny")
 
 res$text
 #> [1] "And so my fellow Americans ask not what your country can do for you, ask what you can do for your country."
@@ -46,7 +47,7 @@ res
 #> <transcribe_result>
 #> • language: "en"
 #> • timestamps: "segment"
-#> • audio: 11s (145.3x real time)
+#> • audio: 11s (112.4x real time)
 #> • 1 segment, 0 words
 #> ────────────────────────────────────────────────────────────────────────────────
 #> [00:00:00.000 -> 00:00:10.500] And so my fellow Americans ask not what your country can do for you, ask what you can do for your country.
@@ -140,7 +141,8 @@ Loading a model is the expensive part. Load once, then reuse the
 session:
 
 ``` r
-m <- transcribe_load_model(model)
+m <- transcribe_load_model("whisper-tiny")
+#> ✔ Using cached model '/home/johannes/.cache/R/rtranscribe/whisper-tiny-Q8_0.gguf'.
 s <- transcribe_session(m, n_threads = 8)
 
 # assuming that the folder audio contains audio files
@@ -161,7 +163,7 @@ results
 #> <transcribe_result>
 #> • language: "de"
 #> • timestamps: "segment"
-#> • audio: 29.3s (454.5x real time)
+#> • audio: 29.3s (260.4x real time)
 #> • 1 segment, 0 words
 #> ────────────────────────────────────────────────────────────────────────────────
 #> [00:00:00.000 -> 00:00:29.000] Am Strand der Bade anzug die Badehose, die Sandalen, die Luftmatratze, das Handtuch, das Eis, der Ball, die Sonne, das Meer, die Wellen,
@@ -170,7 +172,7 @@ results
 #> <transcribe_result>
 #> • language: "en"
 #> • timestamps: "segment"
-#> • audio: 11s (170.4x real time)
+#> • audio: 11s (97.7x real time)
 #> • 1 segment, 0 words
 #> ────────────────────────────────────────────────────────────────────────────────
 #> [00:00:00.000 -> 00:00:10.500] And so my fellow Americans ask not what your country can do for you, ask what you can do for your country.
@@ -222,7 +224,7 @@ transcribe_run(
 #> <transcribe_result>
 #> • language: "de"
 #> • timestamps: "segment"
-#> • audio: 29.3s (347.6x real time)
+#> • audio: 29.3s (291.7x real time)
 #> • 1 segment, 0 words
 #> ────────────────────────────────────────────────────────────────────────────────
 #> [00:00:00.000 -> 00:00:28.000] On the beach the boat train, the boat train, the sandals, the air mattress, the shower, the ice, the ball, the sun, the sea, the waves,
@@ -286,7 +288,7 @@ transcribe_run(
 #> <transcribe_result>
 #> • language: "en"
 #> • timestamps: "segment"
-#> • audio: 134.9s (418.9x real time)
+#> • audio: 134.9s (327.5x real time)
 #> • 22 segments, 0 words
 #> ────────────────────────────────────────────────────────────────────────────────
 #> [00:00:00.000 -> 00:00:07.000] GESIS is one of the world's leading infrastructural institutions for social science research.

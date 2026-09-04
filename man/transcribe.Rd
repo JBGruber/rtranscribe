@@ -24,7 +24,9 @@ transcribe(
 \arguments{
 \item{audio}{A numeric vector of 16 kHz mono PCM, or a path to an audio file.}
 
-\item{model}{A path to a \code{.gguf} file, a \code{transcribe_model}, or a
+\item{model}{A path to a \code{.gguf} file, the name of a model from
+\code{\link[=transcribe_models]{transcribe_models()}} (downloaded on demand, see
+\code{\link[=transcribe_download_model]{transcribe_download_model()}}), a \code{transcribe_model}, or a
 \code{transcribe_session}.}
 
 \item{task}{\code{"transcribe"} (default) or \code{"translate"}. Translation requires

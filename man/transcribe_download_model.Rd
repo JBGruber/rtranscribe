@@ -8,7 +8,8 @@ transcribe_download_model(
   name,
   dest = transcribe_cache_dir(),
   overwrite = FALSE,
-  quiet = FALSE
+  quiet = FALSE,
+  ask = FALSE
 )
 }
 \arguments{
@@ -20,6 +21,9 @@ transcribe_download_model(
 \item{overwrite}{Re-download even if the file already exists.}
 
 \item{quiet}{Suppress progress output.}
+
+\item{ask}{If the model needs to be downloaded, ask the user to confirm
+the download first.}
 }
 \value{
 The path to the downloaded file, invisibly.

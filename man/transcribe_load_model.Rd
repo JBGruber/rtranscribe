@@ -7,7 +7,9 @@
 transcribe_load_model(path, backend = "auto", gpu_device = 0L)
 }
 \arguments{
-\item{path}{Path to a \code{.gguf} model file.}
+\item{path}{Path to a \code{.gguf} model file, or the name of a model from
+\code{\link[=transcribe_models]{transcribe_models()}}. A name that is not in the cache yet is fetched
+with \code{\link[=transcribe_download_model]{transcribe_download_model()}}, after asking for confirmation.}
 
 \item{backend}{Compute backend to request: \code{"auto"} (default), \code{"cpu"},
 \code{"cpu_accel"}, \code{"metal"}, \code{"vulkan"} or \code{"cuda"}. \code{"auto"} uses the first

@@ -6,7 +6,9 @@
 #' external pointer to native memory: it cannot be saved to disk or sent to
 #' another R process, and it is freed automatically when garbage collected.
 #'
-#' @param path Path to a `.gguf` model file.
+#' @param path Path to a `.gguf` model file, or the name of a model from
+#'   [transcribe_models()]. A name that is not in the cache yet is fetched
+#'   with [transcribe_download_model()], after asking for confirmation.
 #' @param backend Compute backend to request: `"auto"` (default), `"cpu"`,
 #'   `"cpu_accel"`, `"metal"`, `"vulkan"` or `"cuda"`. `"auto"` uses the first
 #'   GPU device that initialises and falls back to the CPU; naming a GPU
@@ -28,20 +30,17 @@
 #' @seealso [transcribe_session()], [transcribe_capabilities()], [transcribe()]
 #' @export
 transcribe_load_model <- function(path, backend = "auto", gpu_device = 0L) {
-  if (!is.character(path) || length(path) != 1L || is.na(path)) {
-    cli::cli_abort("{.arg path} must be a single file path.")
-  }
-  path <- path.expand(path)
-  if (!file.exists(path)) {
-    cli::cli_abort(c(
-      "Model file not found: {.path {path}}.",
-      "i" = "Use {.fn transcribe_download_model} to fetch a model, or pass a path to your own {.file .gguf} file."
-    ))
-  }
-  backend <- match_opt(backend, c("auto", "cpu", "cpu_accel", "metal", "vulkan", "cuda"))
+  path <- resolve_model_path(path, arg = "path")
+  backend <- match_opt(
+    backend,
+    c("auto", "cpu", "cpu_accel", "metal", "vulkan", "cuda")
+  )
   gpu_device <- check_scalar_int(gpu_device, allow_null = FALSE)
 
-  if (!backend %in% c("auto", "cpu", "cpu_accel") && !cpp_backend_available(backend)) {
+  if (
+    !backend %in% c("auto", "cpu", "cpu_accel") &&
+      !cpp_backend_available(backend)
+  ) {
     cli::cli_abort(c(
       "No {.val {backend}} device is available.",
       "i" = "Available devices: {.val {transcribe_devices()$kind}}.",
@@ -75,7 +74,9 @@ model_ptr <- function(x, arg = "model") {
   if (inherits(x, "transcribe_model")) {
     return(x$ptr)
   }
-  cli::cli_abort("{.arg {arg}} must be a {.cls transcribe_model}, not {.obj_type_friendly {x}}.")
+  cli::cli_abort(
+    "{.arg {arg}} must be a {.cls transcribe_model}, not {.obj_type_friendly {x}}."
+  )
 }
 
 #' Model capabilities and feature probes
@@ -109,10 +110,18 @@ transcribe_capabilities <- function(model) {
 #' @rdname transcribe_capabilities
 #' @export
 transcribe_supports <- function(model, feature) {
-  feature <- match_opt(feature, c(
-    "initial_prompt", "temperature_fallback", "long_form",
-    "cancellation", "pnc", "itn", "diarization"
-  ))
+  feature <- match_opt(
+    feature,
+    c(
+      "initial_prompt",
+      "temperature_fallback",
+      "long_form",
+      "cancellation",
+      "pnc",
+      "itn",
+      "diarization"
+    )
+  )
   cpp_model_supports(model_ptr(model), feature)
 }
 
@@ -154,21 +163,29 @@ transcribe_model_info <- function(model, key = NULL) {
 
 #' @export
 print.transcribe_model <- function(x, ...) {
-  cli::cli_text("{.cls transcribe_model} {.strong {x$arch}}{if (nzchar(x$variant)) paste0(' / ', x$variant) else ''}")
+  cli::cli_text(
+    "{.cls transcribe_model} {.strong {x$arch}}{if (nzchar(x$variant)) paste0(' / ', x$variant) else ''}"
+  )
   cli::cli_bullets(c("*" = "file:    {.path {basename(x$path)}}"))
   cli::cli_bullets(c("*" = "backend: {.val {x$backend}}"))
   caps <- tryCatch(transcribe_capabilities(x), error = function(e) NULL)
   if (!is.null(caps)) {
     nl <- length(caps$languages)
-    cli::cli_bullets(c("*" = "languages: {if (nl == 0) 'not advertised' else nl}"))
+    cli::cli_bullets(c(
+      "*" = "languages: {if (nl == 0) 'not advertised' else nl}"
+    ))
     feats <- c(
       if (caps$supports_translate) "translate",
       if (caps$supports_streaming) "streaming",
       if (transcribe_supports(x, "diarization")) "diarization",
       if (caps$supports_language_detect) "language detection"
     )
-    cli::cli_bullets(c("*" = "supports: {if (length(feats)) paste(feats, collapse = ', ') else 'transcription only'}"))
-    cli::cli_bullets(c("*" = "timestamps up to: {.val {caps$max_timestamp_kind}}"))
+    cli::cli_bullets(c(
+      "*" = "supports: {if (length(feats)) paste(feats, collapse = ', ') else 'transcription only'}"
+    ))
+    cli::cli_bullets(c(
+      "*" = "timestamps up to: {.val {caps$max_timestamp_kind}}"
+    ))
   }
   invisible(x)
 }

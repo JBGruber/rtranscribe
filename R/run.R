@@ -199,7 +199,9 @@ transcribe_run_batch <- function(session,
 #'
 #' @inheritParams transcribe_run
 #' @param audio A numeric vector of 16 kHz mono PCM, or a path to an audio file.
-#' @param model A path to a `.gguf` file, a `transcribe_model`, or a
+#' @param model A path to a `.gguf` file, the name of a model from
+#'   [transcribe_models()] (downloaded on demand, see
+#'   [transcribe_download_model()]), a `transcribe_model`, or a
 #'   `transcribe_session`.
 #' @param n_threads Number of CPU threads. `NULL` lets the library decide.
 #'   Ignored when `model` is already a session.
@@ -248,13 +250,7 @@ as_session <- function(model, n_threads = NULL) {
     return(transcribe_session(model, n_threads = n_threads))
   }
   if (is.character(model) && length(model) == 1L) {
-    path <- path.expand(model)
-    if (!file.exists(path)) {
-      cli::cli_abort(c(
-        "Model file not found: {.path {path}}.",
-        "i" = "Use {.fn transcribe_download_model} to fetch one."
-      ))
-    }
+    path <- resolve_model_path(model, arg = "model")
     # One-shot path: the native session owns the model it loads, so a single
     # finalizer frees both.
     n_threads <- check_scalar_int(n_threads) %||% 0L
