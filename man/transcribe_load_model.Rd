@@ -10,10 +10,13 @@ transcribe_load_model(path, backend = "auto", gpu_device = 0L)
 \item{path}{Path to a \code{.gguf} model file.}
 
 \item{backend}{Compute backend to request: \code{"auto"} (default), \code{"cpu"},
-\code{"cpu_accel"}, \code{"metal"}, \code{"vulkan"} or \code{"cuda"}. The CRAN-style source
-build of this package is CPU-only, so anything other than \code{"auto"},
-\code{"cpu"} or \code{"cpu_accel"} will fail unless the package was built with GPU
-support.}
+\code{"cpu_accel"}, \code{"metal"}, \code{"vulkan"} or \code{"cuda"}. \code{"auto"} uses the first
+GPU device that initialises and falls back to the CPU; naming a GPU
+backend is an assertion and errors if it is unavailable. The default build
+is CPU-only — a GPU backend has to be compiled in at install time with
+\code{TRANSCRIBE_R_VULKAN=1}, \code{TRANSCRIBE_R_CUDA=1} or \code{TRANSCRIBE_R_METAL=1}
+(see the README), and needs a working driver at run time —
+\code{\link[=transcribe_backend_available]{transcribe_backend_available()}} checks both.}
 
 \item{gpu_device}{Multi-GPU selector. \code{0} (default) means "first device of
 the chosen kind"; a positive value selects the device at that index in

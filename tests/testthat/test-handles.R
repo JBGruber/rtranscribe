@@ -33,5 +33,5 @@ test_that("unsupported backends are reported before loading", {
   skip_if(transcribe_backend_available("cuda"), "CUDA build")
   tmp <- dummy_gguf()
   on.exit(unlink(tmp))
-  expect_error(transcribe_load_model(tmp, backend = "cuda"), "not available")
+  expect_error(transcribe_load_model(tmp, backend = "cuda"), "device is available")
 })

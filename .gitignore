@@ -12,3 +12,5 @@ src/transcribe-cpp/install/
 *.tar.gz
 snowflake.log
 test.mp4
+.Renviron
+GESIS-Imagefilm_en.webm

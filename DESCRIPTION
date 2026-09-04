@@ -33,7 +33,8 @@ Imports:
     stats,
     tibble,
     tools,
-    utils
+    utils,
+    rlang
 LinkingTo:
     Rcpp
 Suggests:
@@ -42,9 +43,11 @@ Suggests:
     httr2,
     methods,
     testthat (>= 3.0.0)
-SystemRequirements: cmake (>= 3.16), C++17, GNU make
+SystemRequirements: cmake (>= 3.16), C++17, GNU make; optionally the Vulkan
+    headers and glslc (for TRANSCRIBE_R_VULKAN=1) or the CUDA toolkit (for
+    TRANSCRIBE_R_CUDA=1)
 Config/testthat/edition: 3
 Roxygen: list(markdown = TRUE)
 Biarch: false
-Config/roxygen2/version: 8.0.0
+Config/roxygen2/version: 8.1.0
 OS_type: unix

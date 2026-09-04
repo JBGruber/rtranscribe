@@ -38,6 +38,23 @@ bundled sources with no external library to install.
   `moonshine_streaming_options()` and `voxtral_realtime_options()` for
   streaming knobs, validated with `transcribe_accepts_options()`.
 
+## Backends
+
+* The default build is CPU-only and needs nothing but a compiler and `cmake`.
+* Vulkan, CUDA and Metal can be compiled in per install, from a source install
+  (`pak::pak()`, `remotes::install_github()` or `R CMD INSTALL`):
+
+  ```sh
+  TRANSCRIBE_R_VULKAN=1 R CMD INSTALL .   # AMD / Intel / NVIDIA, needs glslc
+  TRANSCRIBE_R_CUDA=1   R CMD INSTALL .   # NVIDIA, needs the CUDA toolkit
+  TRANSCRIBE_R_METAL=1  R CMD INSTALL .   # Apple Silicon
+  ```
+
+  `configure` checks for the build dependencies first and fails with an
+  install hint rather than deep inside CMake. `transcribe_devices()` then lists
+  the GPU alongside the CPU, and `transcribe_load_model(backend = "vulkan")`
+  selects it; `backend = "auto"` prefers a GPU and falls back to the CPU.
+
 ## Other
 
 * Long runs can be interrupted with Ctrl-C.
@@ -56,8 +73,9 @@ bundled sources with no external library to install.
 
 * Windows is not supported yet (`OS_type: unix`). `configure.win` is in the
   tree as a starting point but is unproven.
-* The build is CPU-only. The R API is already backend-agnostic, so enabling
-  Vulkan, CUDA or Metal is a build-configuration change rather than a code
-  change.
+* Only the CPU and Vulkan builds have been tested. The CUDA and Metal switches
+  are wired up but have not been run on hardware; reports welcome.
+* GPU backends require a source install. Prebuilt r-universe binaries are
+  CPU-only, since a binary has to install on machines with no GPU SDK.
 * Speaker diarization is implemented but has not been verified end-to-end,
   because the smallest diarization-capable model is over 1 GB.

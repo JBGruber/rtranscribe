@@ -1,17 +1,21 @@
+
+<!-- README.md is generated from README.Rmd. Please edit that file -->
+
 # rtranscribe
 
 <!-- badges: start -->
+
 [![R-CMD-check](https://github.com/JBGruber/rtranscribe/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/JBGruber/rtranscribe/actions/workflows/R-CMD-check.yaml)
-[![r-universe](https://jbgruber.r-universe.dev/badges/rtranscribe)](https://jbgruber.r-universe.dev/rtranscribe)
 <!-- badges: end -->
 
-R bindings to [transcribe.cpp](https://github.com/handy-computer/transcribe.cpp),
-a C++ speech-recognition library that runs 16 model families (Whisper,
+R bindings to
+[transcribe.cpp](https://github.com/handy-computer/transcribe.cpp), a
+C++ speech-recognition library that runs 16 model families (Whisper,
 Parakeet, Moonshine, Voxtral, Canary and more) locally on the CPU.
 
-Everything runs on your machine: no API keys, no per-minute billing, and no
-audio leaves the computer. The C++ sources are bundled and compiled at install
-time, so there is no separate library to install.
+Everything runs on your machine: no API keys, no per-minute billing, and
+no audio leaves the computer. The C++ sources are bundled and compiled
+at install time, so there is no separate library to install.
 
 ## Installation
 
@@ -19,18 +23,8 @@ You need **cmake** and a C++17 compiler. The R sources build the bundled
 library, which takes a few minutes the first time.
 
 ``` r
-# Debian/Ubuntu: sudo apt-get install cmake
-# Fedora:        sudo dnf install cmake
-# macOS:         brew install cmake
-
 # install.packages("remotes")
 remotes::install_github("JBGruber/rtranscribe")
-```
-
-Or from r-universe, which ships prebuilt binaries:
-
-``` r
-install.packages("rtranscribe", repos = "https://jbgruber.r-universe.dev")
 ```
 
 ## Quick start
@@ -40,22 +34,22 @@ library(rtranscribe)
 
 # Fetch a small model (44 MB) into the package cache
 model <- transcribe_download_model("whisper-tiny")
+#> ✔ Using cached model '/home/johannes/.cache/R/rtranscribe/whisper-tiny-Q8_0.gguf'.
 
-# Transcribe
-res <- transcribe("interview.mp3", model)
+# Transcribe (uses a small audio file included in the package)
+jfk_file <- system.file("extdata", "jfk.wav", package = "rtranscribe")
+res <- transcribe(jfk_file, model)
 
 res$text
-#> [1] "And so my fellow Americans, ask not what your country can do for you..."
-
+#> [1] "And so my fellow Americans ask not what your country can do for you, ask what you can do for your country."
 res
 #> <transcribe_result>
 #> • language: "en"
 #> • timestamps: "segment"
-#> • audio: 11s (12.0x real time)
+#> • audio: 11s (112.7x real time)
 #> • 1 segment, 0 words
-#> ────────────────────────────────────────────────────────────
-#> [00:00:00.000 -> 00:00:10.500] And so my fellow Americans, ask not what
-#> your country can do for you, ask what you can do for your country.
+#> ────────────────────────────────────────────────────────────────────────────────
+#> [00:00:00.000 -> 00:00:10.500] And so my fellow Americans ask not what your country can do for you, ask what you can do for your country.
 ```
 
 Results come back as tibbles:
@@ -63,59 +57,76 @@ Results come back as tibbles:
 ``` r
 res$segments
 #> # A tibble: 1 × 8
-#>   start   end text                                speaker_id first_word ...
-#>   <dbl> <dbl> <chr>                                    <int>      <int>
-#> 1     0  10.5 "And so my fellow Americans, ask n…         NA          0
-
-res$words    # word-level rows, when the model produces them
-res$tokens   # token ids with confidences
+#>   start   end text            speaker_id first_word n_words first_token n_tokens
+#>   <dbl> <dbl> <chr>                <int>      <int>   <int>       <int>    <int>
+#> 1     0  10.5 And so my fell…         NA          0       0           0        0
+res$words # word-level rows, when the model produces them
+#> # A tibble: 0 × 6
+#> # ℹ 6 variables: start <dbl>, end <dbl>, text <chr>, segment <int>,
+#> #   first_token <int>, n_tokens <int>
+res$tokens # token ids with confidences
+#> # A tibble: 0 × 7
+#> # ℹ 7 variables: id <int>, p <dbl>, start <dbl>, end <dbl>, text <chr>,
+#> #   segment <int>, word <int>
 res$speakers # who spoke when, after diarization
+#> # A tibble: 0 × 4
+#> # ℹ 4 variables: start <dbl>, end <dbl>, speaker_id <int>, p <dbl>
 ```
 
-Any audio format `ffmpeg` reads works (wav, mp3, m4a, flac, ogg, and the audio
-track of video files) via the [av](https://cran.r-project.org/package=av)
-package. You can also pass a numeric vector of 16 kHz mono PCM directly.
+Any audio format `ffmpeg` reads works (wav, mp3, m4a, flac, ogg, and the
+audio track of video files) via the
+[av](https://cran.r-project.org/package=av) package. You can also pass a
+numeric vector of 16 kHz mono PCM directly.
 
 ## Choosing a model
 
 ``` r
 transcribe_models()
 #> # A tibble: 6 × 6
-#>   name                     family     size_mb   wer downloaded note
-#>   <chr>                    <chr>        <dbl> <dbl> <lgl>      <chr>
-#> 1 whisper-tiny             whisper         44  7.53 TRUE       Smallest mult…
-#> 2 whisper-tiny.en          whisper         44  5.72 FALSE      English-only;…
-#> 3 whisper-base             whisper         81  5.12 FALSE      Multilingual,…
-#> 4 whisper-large-v3-turbo   whisper        845  2.01 FALSE      Best general-…
-#> 5 parakeet-tdt-0.6b-v3     parakeet       740  1.94 FALSE      Fast transduc…
-#> 6 moonshine-streaming-tiny moonshine…      48  4.52 FALSE      Small streami…
+#>   name                     family              size_mb   wer downloaded note    
+#>   <chr>                    <chr>                 <dbl> <dbl> <lgl>      <chr>   
+#> 1 whisper-tiny             whisper                  44  7.53 TRUE       Smalles…
+#> 2 whisper-tiny.en          whisper                  44  5.72 FALSE      English…
+#> 3 whisper-base             whisper                  81  5.12 TRUE       Multili…
+#> 4 whisper-large-v3-turbo   whisper                 845  2.01 TRUE       Best ge…
+#> 5 parakeet-tdt-0.6b-v3     parakeet                740  1.94 TRUE       Fast tr…
+#> 6 moonshine-streaming-tiny moonshine_streaming      48  4.52 TRUE       Small s…
 ```
 
 That is a curated shortlist. `refresh = TRUE` fetches the full catalogue
-(~68 models) from the Hugging Face API and appends everything else at the
-bottom:
+(~70 models) from the Hugging Face API and appends everything else at
+the bottom:
 
 ``` r
 transcribe_models(refresh = TRUE)
-#> # A tibble: 68 × 6
-#>    name                     family  size_mb   wer downloaded note
-#>    <chr>                    <chr>     <dbl> <dbl> <lgl>      <chr>
-#>  1 whisper-tiny             whisper      44  7.53 TRUE       Smallest mult…
-#>  …
-#> 68 whisper-small.en         NA           NA    NA FALSE      NA
+#> # A tibble: 70 × 6
+#>    name                     family              size_mb   wer downloaded note   
+#>    <chr>                    <chr>                 <dbl> <dbl> <lgl>      <chr>  
+#>  1 whisper-tiny             whisper                  44  7.53 TRUE       Smalle…
+#>  2 whisper-tiny.en          whisper                  44  5.72 FALSE      Englis…
+#>  3 whisper-base             whisper                  81  5.12 TRUE       Multil…
+#>  4 whisper-large-v3-turbo   whisper                 845  2.01 TRUE       Best g…
+#>  5 parakeet-tdt-0.6b-v3     parakeet                740  1.94 TRUE       Fast t…
+#>  6 moonshine-streaming-tiny moonshine_streaming      48  4.52 TRUE       Small …
+#>  7 Breeze-ASR-25            <NA>                     NA NA    FALSE      <NA>   
+#>  8 canary-180m-flash        <NA>                     NA NA    FALSE      <NA>   
+#>  9 canary-1b                <NA>                     NA NA    FALSE      <NA>   
+#> 10 canary-1b-flash          <NA>                     NA NA    FALSE      <NA>   
+#> # ℹ 60 more rows
 ```
 
-The appended rows carry only a name: the listing API does not report size, WER
-or the transcribe.cpp architecture, and the repository tags are not a safe
-substitute (`moonshine-streaming-*` is tagged `moonshine`, but its family is
-`moonshine_streaming`). Read the authoritative architecture with
-`transcribe_model_info()` after downloading. Once refreshed, any listed name
-can be passed to `transcribe_download_model()`.
+The appended rows carry only a name: the listing API does not report
+size, WER or the transcribe.cpp architecture, and the repository tags
+are not a safe substitute (`moonshine-streaming-*` is tagged
+`moonshine`, but its family is `moonshine_streaming`). Read the
+authoritative architecture with `transcribe_model_info()` after
+downloading. Once refreshed, any listed name can be passed to
+`transcribe_download_model()`.
 
-This is a convenience, not a limit: any GGUF converted for transcribe.cpp
-works. Browse the catalogue at
-[huggingface.co/handy-computer](https://huggingface.co/handy-computer) and pass
-a path or URL directly.
+This is a convenience, not a limit: any GGUF converted for
+transcribe.cpp works. Browse the catalogue at
+[huggingface.co/handy-computer](https://huggingface.co/handy-computer)
+and pass a path or URL directly.
 
 ``` r
 m <- transcribe_load_model("~/models/parakeet-tdt-0.6b-v3-Q8_0.gguf")
@@ -125,66 +136,130 @@ transcribe_supports(m, "diarization")
 
 ## Reusing a model
 
-Loading a model is the expensive part. Load once, then reuse the session:
+Loading a model is the expensive part. Load once, then reuse the
+session:
 
 ``` r
 m <- transcribe_load_model(model)
 s <- transcribe_session(m, n_threads = 8)
 
+# assuming that the folder audio contains audio files
 for (f in list.files("audio", full.names = TRUE)) {
   res <- transcribe_run(s, f)
   cat(basename(f), ":", res$text, "\n")
 }
 ```
 
-For many short clips, `transcribe_run_batch()` processes them in one dispatch:
+For many short clips, `transcribe_run_batch()` processes them in one
+dispatch:
 
 ``` r
-files <- list.files("clips", pattern = "\\.wav$", full.names = TRUE)
+files <- list.files("inst/extdata", pattern = "\\.wav$", full.names = TRUE)
 results <- transcribe_run_batch(s, files)
-vapply(results, function(r) r$text, character(1))
+results
+#> [[1]]
+#> <transcribe_result>
+#> • language: "de"
+#> • timestamps: "segment"
+#> • audio: 29.3s (249.4x real time)
+#> • 1 segment, 0 words
+#> ────────────────────────────────────────────────────────────────────────────────
+#> [00:00:00.000 -> 00:00:29.000] Am Strand der Bade anzug die Badehose, die Sandalen, die Luftmatratze, das Handtuch, das Eis, der Ball, die Sonne, das Meer, die Wellen,
+#> 
+#> [[2]]
+#> <transcribe_result>
+#> • language: "en"
+#> • timestamps: "segment"
+#> • audio: 11s (93.5x real time)
+#> • 1 segment, 0 words
+#> ────────────────────────────────────────────────────────────────────────────────
+#> [00:00:00.000 -> 00:00:10.500] And so my fellow Americans ask not what your country can do for you, ask what you can do for your country.
 ```
 
 ## Timestamps, translation and speakers
 
+Timestamps, translation and diarization are three independent
+capabilities and no single family has all three, so this section uses
+three sessions. Whisper tops out at segment timestamps; Parakeet
+resolves timings per token but has no translate head; speaker
+attribution needs a model trained for it.
+
 ``` r
-# Word-level timings (models that support them)
-res <- transcribe_run(s, "speech.wav", timestamps = "word")
+# Word-level timings: Parakeet times every token, so "word" is available
+pm <- transcribe_download_model("parakeet-tdt-0.6b-v3") |>
+  transcribe_load_model()
+#> ✔ Using cached model '/home/johannes/.cache/R/rtranscribe/parakeet-tdt-0.6b-v3-Q8_0.gguf'.
+ps <- transcribe_session(pm, n_threads = 8)
+res <- transcribe_run(ps, jfk_file, timestamps = "word")
 res$words
+#> # A tibble: 22 × 6
+#>    start   end text       segment first_token n_tokens
+#>    <dbl> <dbl> <chr>        <int>       <int>    <int>
+#>  1  0.24  0.56 And              1           0        0
+#>  2  0.56  1.04 so,              1           0        0
+#>  3  1.04  1.28 my               1           0        0
+#>  4  1.28  1.76 fellow           1           0        0
+#>  5  1.76  3.28 Americans,       1           0        0
+#>  6  3.28  3.92 ask              1           0        0
+#>  7  4.24  4.56 not              1           0        0
+#>  8  5.2   5.52 what             1           0        0
+#>  9  5.52  5.68 your             1           0        0
+#> 10  6     6.56 country          1           0        0
+#> # ℹ 12 more rows
 
-# Translate into English
-transcribe_run(s, "german.wav", task = "translate", target_language = "en")
+# Translate into English. Note the model: the turbo distillation dropped the
+# translate task, so this needs a plain multilingual whisper.
+tm <- transcribe_download_model("whisper-base") |>
+  transcribe_load_model()
+#> ✔ Using cached model '/home/johannes/.cache/R/rtranscribe/whisper-base-Q8_0.gguf'.
+german_file <- system.file("extdata", "german.wav", package = "rtranscribe")
+transcribe_run(
+  transcribe_session(tm),
+  german_file,
+  task = "translate",
+  target_language = "en"
+)
+#> <transcribe_result>
+#> • language: "de"
+#> • timestamps: "segment"
+#> • audio: 29.3s (301.4x real time)
+#> • 1 segment, 0 words
+#> ────────────────────────────────────────────────────────────────────────────────
+#> [00:00:00.000 -> 00:00:28.000] On the beach the boat train, the boat train, the sandals, the air mattress, the shower, the ice, the ball, the sun, the sea, the waves,
+```
 
-# Speaker attribution
-res <- transcribe_run(s, "meeting.wav", diarize = TRUE)
+``` r
+# Speaker attribution, on a model that advertises it
+dm <- transcribe_download_model("moss-transcribe-diarize") |>
+  transcribe_load_model()
+res <- transcribe_run(transcribe_session(dm), "meeting.wav", diarize = TRUE)
 res$speakers
 res$segments$speaker_id
 ```
 
-`res$timestamp_kind` reports the granularity you actually got, which may be
-coarser than requested; check `transcribe_capabilities(m)$max_timestamp_kind`
-before asking for a finer one.
-
-## Streaming
-
-Streaming models emit text while audio is still arriving. `committed` text is
-append-only and safe to display; `full` is the model's current hypothesis and
-may be revised.
+Asking a model for something it cannot do is an error rather than a
+silent downgrade – `unsupported timestamp granularity (status 12)` for
+timestamps, `unsupported task (status 11)` for translation – so check
+the model first:
 
 ``` r
-m <- transcribe_load_model(transcribe_download_model("moonshine-streaming-tiny"))
-s <- transcribe_session(m)
-
-st <- transcribe_stream_begin(s, family = moonshine_streaming_options())
-for (chunk in chunks) {
-  transcribe_stream_feed(st, chunk)
-  cat("\r", transcribe_stream_text(st)$committed)
-}
-transcribe_stream_finalize(st)
+transcribe_capabilities(pm)$max_timestamp_kind # "token"
+#> [1] "token"
+transcribe_capabilities(m)$max_timestamp_kind # "segment"
+#> [1] "segment"
+transcribe_capabilities(m)$supports_translate # FALSE, on turbo
+#> [1] TRUE
+transcribe_supports(pm, "diarization")
+#> [1] FALSE
 ```
 
-`transcribe_stream_all()` drives that whole loop over one vector, which is
-handy for testing.
+Both limits are properties of the model, not of its size. Every Whisper
+variant caps at `"segment"`, `whisper-large-v3-turbo` included;
+Parakeet, GigaAM and MedASR reach `"token"`, `granite-speech-*-plus`
+reaches `"word"`, and the remaining families report `"none"`.
+`timestamps = "auto"` (the default) never errors: it resolves to
+whatever the model can produce, and `res$timestamp_kind` reports what
+you actually got.
 
 ## Model-specific options
 
@@ -192,29 +267,88 @@ Some families expose knobs that do not generalise. They are passed with
 `family =` and validated against the loaded model:
 
 ``` r
+video_f <- curl::curl_download(
+  "https://www.gesis.org/fileadmin/Home/GESIS-Imagefilm_en.webm",
+  "GESIS-Imagefilm_en.webm"
+)
 # Bias Whisper's decoding toward domain vocabulary
-transcribe_run(s, "talk.wav", family = whisper_options(
-  initial_prompt = "GESIS, Mannheim, Leibniz-Institut"
-))
+transcribe_run(
+  s,
+  video_f,
+  family = whisper_options(
+    initial_prompt = "GESIS – Leibniz Institute for the Social Sciences "
+  )
+)
+#> <transcribe_result>
+#> • language: "en"
+#> • timestamps: "segment"
+#> • audio: 134.9s (334.2x real time)
+#> • 22 segments, 0 words
+#> ────────────────────────────────────────────────────────────────────────────────
+#> [00:00:00.000 -> 00:00:07.000] GESIS is one of the world's leading infrastructural institutions for social science research.
+#> [00:00:07.000 -> 00:00:15.000] With over 350 employees and manheim and colon, we contribute to a better understanding of our society.
+#> [00:00:15.000 -> 00:00:22.000] What attitudes and opinions do people in Germany have? What values are important to them?
+#> [00:00:22.000 -> 00:00:29.000] How has their thinking changed over time? And how does it differ from our European neighbors and worldwide?
+#> [00:00:30.000 -> 00:00:37.000] We conduct research on these questions and provide other researchers with the building blocks to carry out their own projects.
+#> ... 17 more segments
 
-transcribe_accepts_options(m, whisper_options())  # TRUE for whisper models
+transcribe_accepts_options(m, whisper_options()) # TRUE for whisper models
+#> [1] TRUE
 ```
 
 Also available: `parakeet_stream_options()`,
-`parakeet_buffered_stream_options()`, `moonshine_streaming_options()` and
-`voxtral_realtime_options()`.
+`parakeet_buffered_stream_options()`, `moonshine_streaming_options()`
+and `voxtral_realtime_options()`.
 
-## Performance notes
+## GPU backends
 
-- The default build targets a conservative CPU baseline so binaries run
-  anywhere. For a local build tuned to your own CPU:
-  `TRANSCRIBE_R_NATIVE=1 R CMD INSTALL .`
-- `n_threads` in `transcribe_session()` is the main throughput knob.
-- Long transcriptions can be interrupted with <kbd>Ctrl</kbd>+<kbd>C</kbd>.
-- GPU backends (Vulkan, CUDA, Metal) are a build-time option that this release
-  does not enable; the R API is already backend-agnostic.
+The default build is CPU-only, because it has to work on any machine
+with a compiler. A GPU backend is compiled in on request, at install
+time:
 
-## Licence
+``` sh
+TRANSCRIBE_R_VULKAN=1 R CMD INSTALL .   # AMD, Intel and NVIDIA
+TRANSCRIBE_R_CUDA=1   R CMD INSTALL .   # NVIDIA only
+TRANSCRIBE_R_METAL=1  R CMD INSTALL .   # Apple Silicon
+```
 
-MIT. The bundled transcribe.cpp, ggml, miniz and llamafile sources are all MIT
-as well — see `LICENSE.note` and `inst/licenses/`.
+The same variables work with `pak` and `remotes`, which build from
+source when installing from GitHub. Set them in `~/.Renviron`
+(`usethis::edit_r_environ(scope = "project")`) rather than with
+`Sys.setenv()`: pak builds in a background process that inherits the
+environment when it starts, so a variable set later in the session may
+not reach the build.
+
+``` r
+# ~/.Renviron:  TRANSCRIBE_R_VULKAN=1
+pak::pak("JBGruber/rtranscribe")
+```
+
+Each backend needs its SDK at build time — Vulkan needs the loader
+headers and the `glslc` shader compiler, CUDA needs the toolkit — and
+`configure` checks for them up front, with a per-distribution install
+hint if something is missing. More than one can be enabled in the same
+build.
+
+Then use it:
+
+``` r
+transcribe_devices()                     # every device the runtime can see
+transcribe_backend_available("vulkan")   # TRUE only if a Vulkan device is there
+m <- transcribe_load_model(path, backend = "vulkan")   # or "auto"
+```
+
+`transcribe_backend_available()` is a device probe, not a build probe:
+it needs both a build that compiled the backend in *and* a working
+driver, so it stays `FALSE` on a Vulkan build running on a machine with
+no Vulkan device.
+
+`backend = "auto"` takes the first GPU device that initialises (discrete
+before integrated) and falls back to the CPU if none does, so a GPU
+build still runs on a machine with no usable GPU. Naming a backend
+explicitly is an assertion: `backend = "vulkan"` errors rather than
+falling back.
+
+Two caveats. Prebuilt r-universe binaries are CPU-only, so a GPU build
+always means a source install. And of the three, only Vulkan has been
+tested here — CUDA and Metal are wired up but unverified on hardware.

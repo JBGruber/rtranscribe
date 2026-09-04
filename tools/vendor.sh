@@ -42,7 +42,8 @@ cp -R "$R/cmake"    "$DEST/cmake"
 cp -R "$R/include"  "$DEST/include"   # transcribe.h, transcribe.abihash, transcribe/*.h
 cp -R "$R/src"      "$DEST/src"       # transcribe's own code incl. src/third_party/miniz
 
-# ggml: core + CPU backend + build glue + headers only.
+# ggml: core + build glue + headers, plus every backend directory. The prune
+# in step 3 is what decides which backends actually ship.
 mkdir -p "$DEST/ggml/src"
 cp    "$R/ggml/CMakeLists.txt" "$R/ggml/LICENSE" "$R/ggml/AUTHORS" "$R/ggml/UPSTREAM" "$DEST/ggml/"
 cp -R "$R/ggml/cmake"   "$DEST/ggml/cmake"
@@ -51,17 +52,30 @@ cp    "$R/ggml/src/CMakeLists.txt" "$DEST/ggml/src/"
 for f in "$R"/ggml/src/*.c "$R"/ggml/src/*.cpp "$R"/ggml/src/*.h; do
   [ -e "$f" ] && cp "$f" "$DEST/ggml/src/"
 done
-cp -R "$R/ggml/src/ggml-cpu" "$DEST/ggml/src/ggml-cpu"   # includes llamafile/sgemm.cpp
+for d in "$R"/ggml/src/ggml-*; do
+  [ -d "$d" ] && cp -R "$d" "$DEST/ggml/src/"
+done
 
 # License bundle.
 cp "$R/LICENSE" "$R/THIRD-PARTY-LICENSES.md" "$DEST/"
 
-# 3. Prune. Allowlist rather than denylist: any ggml-* backend dir that is not
-#    ggml-cpu is dropped, so a new upstream backend cannot silently slip in.
+# 3. Prune backends. Allowlist rather than denylist: a backend ships only if it
+#    is named here, so a new upstream backend cannot silently slip in.
+#
+#      ggml-cpu     always compiled.
+#      ggml-vulkan  |
+#      ggml-cuda    | opt-in at install time (TRANSCRIBE_R_VULKAN / _CUDA /
+#      ggml-metal   | _METAL, see configure). The sources must be in the
+#                     tarball for those flags to be usable at all, but nothing
+#                     here is compiled unless the flag is set.
+#
+#    Everything else stays out. That includes ggml-sycl and ggml-openvino,
+#    which carry the only Apache-2.0 code in the upstream tree — keeping them
+#    out is what makes the compiled path uniformly MIT (see LICENSE.note).
 for d in "$DEST"/ggml/src/ggml-*; do
   [ -d "$d" ] || continue
   case "$(basename "$d")" in
-    ggml-cpu) ;;
+    ggml-cpu|ggml-vulkan|ggml-cuda|ggml-metal) ;;   # ggml-cpu holds llamafile/sgemm.cpp
     *) rm -rf "$d" ;;
   esac
 done

@@ -8,10 +8,13 @@
 #'
 #' @param path Path to a `.gguf` model file.
 #' @param backend Compute backend to request: `"auto"` (default), `"cpu"`,
-#'   `"cpu_accel"`, `"metal"`, `"vulkan"` or `"cuda"`. The CRAN-style source
-#'   build of this package is CPU-only, so anything other than `"auto"`,
-#'   `"cpu"` or `"cpu_accel"` will fail unless the package was built with GPU
-#'   support.
+#'   `"cpu_accel"`, `"metal"`, `"vulkan"` or `"cuda"`. `"auto"` uses the first
+#'   GPU device that initialises and falls back to the CPU; naming a GPU
+#'   backend is an assertion and errors if it is unavailable. The default build
+#'   is CPU-only — a GPU backend has to be compiled in at install time with
+#'   `TRANSCRIBE_R_VULKAN=1`, `TRANSCRIBE_R_CUDA=1` or `TRANSCRIBE_R_METAL=1`
+#'   (see the README), and needs a working driver at run time —
+#'   [transcribe_backend_available()] checks both.
 #' @param gpu_device Multi-GPU selector. `0` (default) means "first device of
 #'   the chosen kind"; a positive value selects the device at that index in
 #'   [transcribe_devices()].
@@ -40,8 +43,11 @@ transcribe_load_model <- function(path, backend = "auto", gpu_device = 0L) {
 
   if (!backend %in% c("auto", "cpu", "cpu_accel") && !cpp_backend_available(backend)) {
     cli::cli_abort(c(
-      "Backend {.val {backend}} is not available in this build of rtranscribe.",
-      "i" = "Available devices: {.val {transcribe_devices()$kind}}."
+      "No {.val {backend}} device is available.",
+      "i" = "Available devices: {.val {transcribe_devices()$kind}}.",
+      "i" = "Either this install was not built with {.val {backend}} support \\
+             (re-install from source with {.code TRANSCRIBE_R_{toupper(backend)}=1}), \\
+             or no {.val {backend}} driver is present on this machine."
     ))
   }
 

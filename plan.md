@@ -1,579 +1,300 @@
-# Plan: an R package binding for transcribe.cpp
+# Plan: verifying the CUDA backend on the RTX 3060 machine
 
-> This is the from‑scratch build plan for **`rtranscribe`**, an R package that
-> wraps the `transcribe.cpp` C ABI via **Rcpp**, vendoring the C/C++ source and
-> building it with the upstream CMake at install time. Settled choices are listed
-> under "Resolved decisions" at the end.
+> The opt-in GPU build landed with Vulkan proven and CUDA **compiled by nobody**.
+> This plan is what to run on the NVIDIA box to close that gap, in the order
+> that fails fastest, plus the fixes for the failures that are actually likely.
+> The previous contents of this file (the original from-scratch build plan) are
+> superseded by the code and by `AGENTS.md`.
 
-## Context
+## Where things stand
 
-`transcribe.cpp` is a C++ ASR library that exposes a stable, `extern "C"` public
-API (`include/transcribe.h` + `include/transcribe/*.h`, ~80 functions) and ships
-first‑class bindings for Python, Rust, Swift and TypeScript — but no R binding.
-The goal is a first‑class R package that wraps most/all of that surface: load a
-GGUF model, transcribe 16 kHz mono audio, get segments/words/tokens/speakers as
-data frames, stream, diarize, and use family‑specific options.
+`configure` grew three opt-in knobs — `TRANSCRIBE_R_VULKAN`, `TRANSCRIBE_R_CUDA`,
+`TRANSCRIBE_R_METAL` — and `tools/vendor.sh:78` now keeps `ggml-cuda` in the
+vendored tree. On the AMD box the Vulkan build is verified end to end: an
+iGPU shows up in `transcribe_devices()` and `whisper-tiny` transcribes
+`jfk.wav` in 0.39 s against 0.87 s on the CPU.
 
-Decisions already made (locked):
+CUDA has been exercised only as far as the *absence* of `nvcc` — the probe at
+`configure:167-183` errors correctly. Nothing downstream of that has ever run.
+Three specific things are unproven, and they fail in this order:
 
-- **Distribution:** GitHub + r‑universe (not CRAN yet). No install‑time network,
-  source‑only, and cmake‑discouragement rules do **not** bind us — so we can use
-  the robust CMake‑driven build.
-- **Native build:** drive the vendored upstream CMake from the package
-  `configure` script, then link the resulting **static** archives into the Rcpp
-  glue — exactly how `bindings/rust/sys/build.rs` works.
-- **R API style:** functional / S3 (no R6 dependency). Handles are external
-  pointers wrapped in S3 objects; results are lists of tibbles.
-- **Audio:** core functions take a numeric PCM vector (16 kHz mono, [-1,1]); a
-  convenience helper decodes/resamples files via the `av` package (Suggests).
+1. **Does it configure?** `enable_language(CUDA)` plus the host-compiler check.
+2. **Does it link?** The link line is hand-assembled in `configure:313-321`
+   because `transcribe-link.json` does *not* describe ggml-cuda's dependencies
+   (they are `PRIVATE` to that target, so the manifest never sees them). Vulkan
+   and Metal are special-cased upstream in `cmake/transcribe-install.cmake:131-139`;
+   CUDA is not. That fixup is the single most likely thing to be wrong.
+3. **Does it compute?** Device enumeration, `backend = "cuda"`, and output that
+   matches the CPU run.
 
-### Licensing conclusion (you are clear to do this)
+## Prerequisites on the CUDA box
 
-Everything you vendor and compile is **uniformly MIT** — no copyleft:
-
-| Component | License | In‑tree notice |
-|---|---|---|
-| transcribe.cpp | MIT | `LICENSE` (© 2026 The transcribe.cpp authors) |
-| ggml (core + ggml‑cpu) | MIT | `ggml/LICENSE` (© 2023‑2026 The ggml authors) |
-| llamafile / tinyBLAS (`sgemm.cpp`, **compiled in** — `GGML_LLAMAFILE=ON`) | MIT (despite © Mozilla Foundation) | header of `ggml/src/ggml-cpu/llamafile/sgemm.cpp` |
-| miniz (`src/third_party/miniz`) | MIT | `src/third_party/miniz/LICENSE` |
-
-Apache‑2.0 files exist **only** in GPU backends (`ggml-sycl`, `ggml-openvino`)
-that you will not compile and will prune out. There is no GPL/LGPL/MPL anywhere
-in the compiled path.
-
-**Action:** license the R package **MIT**. In `DESCRIPTION` use
-`License: MIT + file LICENSE`; ship the standard R MIT template as `LICENSE`
-(your name/year), and a `LICENSE.note` + `inst/licenses/` carrying verbatim
-copies of the four upstream MIT notices. Add upstream copyright holders as
-`role = "cph"` in `Authors@R` (The transcribe.cpp authors; The ggml authors;
-RAD Game Tools/Valve & Rich Geldreich/Tenacious (miniz); Mozilla Foundation
-(llamafile)). One footgun to note in `LICENSE.note`: the amalgamated
-`miniz.c`/`miniz.h` header comment still reads "public domain" — that is a stale
-upstream artifact; the authoritative license is the MIT text at
-`src/third_party/miniz/LICENSE` (see `THIRD-PARTY-LICENSES.md`).
-
----
-
-## Architecture at a glance
-
-```
-rtranscribe/                   # package name
-├── DESCRIPTION                # LinkingTo Rcpp; SystemRequirements: cmake, C++17, GNU make
-├── NAMESPACE                  # useDynLib(..., .registration=TRUE)
-├── LICENSE  LICENSE.note
-├── configure  configure.win   # run vendored CMake, emit src/Makevars
-├── cleanup    cleanup.win
-├── R/                         # the S3 / functional API
-├── src/
-│   ├── transcribe_glue.cpp    # Rcpp [[export]] functions calling the C ABI  ← the ONLY thing R compiles
-│   ├── RcppExports.cpp        # generated by Rcpp::compileAttributes()
-│   ├── Makevars.in            # template; configure substitutes @PKG_LIBS@
-│   ├── Makevars.win.in
-│   └── transcribe-cpp/        # VENDORED upstream tree (R does NOT recurse/compile here)
-│       ├── CMakeLists.txt  CMakePresets.json  cmake/
-│       ├── include/  src/  ggml/(pruned)  VENDOR
-├── inst/
-│   ├── extdata/jfk.wav        # tiny 16 kHz test clip
-│   └── licenses/              # upstream MIT notices
-├── tools/vendor.sh            # the sync-from-GitHub script
-├── man/  tests/testthat/  README.md
-└── .github/workflows/         # R-CMD-check with system cmake
-```
-
-Two facts make this layout work:
-
-1. **R only auto‑compiles top‑level `src/*.c*`, not subdirectories.** So the whole
-   vendored tree under `src/transcribe-cpp/` is invisible to R's default build —
-   CMake compiles it, R compiles only `transcribe_glue.cpp` and links the static
-   archives. This is the standard trick for CMake‑built native deps.
-2. **The public header is ggml‑free and self‑contained.** The glue only needs
-   `-I src/transcribe-cpp/include` and `#include <transcribe/extensions.h>`.
-
----
-
-## Step 1 — Vendoring the source (the "copy from GitHub" question)
-
-Copy a pinned upstream checkout into `src/transcribe-cpp/`, pruning the GPU
-backends and everything not needed for a CPU build. Do it with a script so
-version bumps are one command. `tools/vendor.sh`:
-
-```bash
-#!/usr/bin/env bash
-# Usage: tools/vendor.sh <git-url-or-local-path> <ref>
-# e.g.:  tools/vendor.sh https://github.com/<owner>/transcribe.cpp v0.2.0
-set -euo pipefail
-SRC="${1:?source repo url or path}"; REF="${2:?git ref/tag/sha}"
-DEST="src/transcribe-cpp"
-WORK="$(mktemp -d)"
-
-# 1. Get the source at the requested ref (shallow clone, or a local worktree)
-if [ -d "$SRC/.git" ]; then
-  git -C "$SRC" archive "$REF" | (mkdir -p "$WORK/repo" && tar -x -C "$WORK/repo")
-  SHA="$(git -C "$SRC" rev-parse "$REF")"
-else
-  git clone --depth 1 --branch "$REF" "$SRC" "$WORK/repo"
-  SHA="$(git -C "$WORK/repo" rev-parse HEAD)"
-fi
-R="$WORK/repo"
-
-# 2. Copy the pieces we compile / include
-rm -rf "$DEST"; mkdir -p "$DEST"
-cp    "$R/CMakeLists.txt" "$R/CMakePresets.json" "$DEST/"
-cp -R "$R/cmake"          "$DEST/cmake"
-cp -R "$R/include"        "$DEST/include"        # transcribe.h, transcribe.abihash, transcribe/*.h
-cp -R "$R/src"            "$DEST/src"            # all of transcribe's own code incl. src/third_party/miniz
-# ggml: keep core + cpu backend + build glue + headers only
-mkdir -p "$DEST/ggml"
-cp    "$R/ggml/CMakeLists.txt" "$R/ggml/LICENSE" "$R/ggml/UPSTREAM" "$DEST/ggml/"
-cp -R "$R/ggml/cmake"     "$DEST/ggml/cmake"
-cp -R "$R/ggml/include"   "$DEST/ggml/include"
-mkdir -p "$DEST/ggml/src"
-cp    "$R/ggml/src/"*.c "$R/ggml/src/"*.cpp "$R/ggml/src/"*.h "$DEST/ggml/src/" 2>/dev/null || true
-cp    "$R/ggml/src/CMakeLists.txt" "$DEST/ggml/src/"
-cp -R "$R/ggml/src/ggml-cpu" "$DEST/ggml/src/ggml-cpu"   # includes llamafile/sgemm.cpp
-# License bundle
-cp    "$R/LICENSE" "$R/THIRD-PARTY-LICENSES.md" "$DEST/"
-
-# 3. Prune GPU/other backends + examples/tests that we never compile
-for d in ggml-cuda ggml-vulkan ggml-sycl ggml-metal ggml-hip ggml-musa \
-         ggml-cann ggml-opencl ggml-webgpu ggml-openvino ggml-rpc \
-         ggml-zdnn ggml-zendnn ggml-blas; do
-  rm -rf "$DEST/ggml/src/$d"
-done
-rm -rf "$DEST/ggml/examples" "$DEST/ggml/tests" "$DEST/ggml/docs"
-
-# 4. Record provenance (this is the ABI pin)
-{ echo "url: $SRC"; echo "ref: $REF"; echo "sha: $SHA";
-  echo "abihash: $(cat "$DEST/include/transcribe.abihash")";
-  echo "vendored: $(date -u +%FT%TZ)"; } > "$DEST/VENDOR"
-rm -rf "$WORK"
-echo "Vendored $REF ($SHA) into $DEST"
-```
-
-Notes / caveats to bake into the script when you run it the first time:
-
-- **macOS Metal (optional):** if you later want a Metal build on Apple Silicon,
-  do *not* prune `ggml-metal`, and drop `-DTRANSCRIBE_METAL=OFF` in `configure`.
-  For the portable baseline, prune it and stay CPU‑only.
-- The top‑level `CMakeLists.txt` gates `tests`/`examples`/`tools` behind options
-  we pass `OFF`, so their dirs aren't referenced — but they aren't copied above
-  anyway. If a future `cmake` configure errors on a missing `add_subdirectory`,
-  copy that dir back and keep it (harmless, just unused).
-- `VENDOR` records the upstream SHA + `transcribe.abihash` (currently
-  `d67a9bd78b964445`). Because the glue compiles against these **same** vendored
-  headers and links the **same** vendored archives, ABI drift is structurally
-  impossible inside one build — unlike Python, the R package needs **no**
-  runtime provider/contract validation. Optionally have `configure` assert the
-  vendored `transcribe.abihash` equals a value pinned in the package, to catch a
-  half‑finished re‑vendor.
-
-Manual alternative (no script): shallow‑clone the repo at a tag, copy the same
-paths listed above into `src/transcribe-cpp/`, delete the pruned dirs, and write
-`VENDOR` by hand. The script just makes it repeatable.
-
----
-
-## Step 2 — Building the native lib from `configure`
-
-The upstream **default** CMake build is already a CPU‑only static lib (C11 +
-C++17, CMake ≥ 3.16, no mandatory system deps). We configure it for portability
-and `TRANSCRIBE_INSTALL=ON` so it emits `lib/transcribe-link.json`.
-
-`configure` (POSIX sh, made executable, `chmod +x`):
+Record all of this before starting — it is the first thing needed to debug
+anything below.
 
 ```sh
-#!/bin/sh
-set -e
-: "${R_HOME:?}"
-CMAKE="$(command -v cmake || true)"
-[ -z "$CMAKE" ] && { echo "ERROR: cmake not found (SystemRequirements: cmake >= 3.16)"; exit 1; }
-
-VENDOR="src/transcribe-cpp"
-BUILD="$VENDOR/build"
-PREFIX="$PWD/$VENDOR/install"
-
-# Match R's toolchain so the static archives link cleanly into the package .so
-CC="$("$R_HOME/bin/R" CMD config CC)"
-CXX="$("$R_HOME/bin/R" CMD config CXX)"
-
-# Portability: distributed r-universe binaries must run on older CPUs -> conservative
-# baseline. Opt into -march=native for a local source install with TRANSCRIBE_R_NATIVE=1.
-CPUFLAGS="-DTRANSCRIBE_X86_CONSERVATIVE=ON -DGGML_NATIVE=OFF"
-[ "${TRANSCRIBE_R_NATIVE:-0}" = "1" ] && CPUFLAGS="-DGGML_NATIVE=ON"
-
-"$CMAKE" -S "$VENDOR" -B "$BUILD" \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DCMAKE_C_COMPILER="$CC" -DCMAKE_CXX_COMPILER="$CXX" \
-  -DCMAKE_INSTALL_PREFIX="$PREFIX" \
-  -DTRANSCRIBE_BUILD_SHARED=OFF -DTRANSCRIBE_INSTALL=ON \
-  -DTRANSCRIBE_BUILD_TESTS=OFF -DTRANSCRIBE_BUILD_EXAMPLES=OFF -DTRANSCRIBE_BUILD_TOOLS=OFF \
-  -DTRANSCRIBE_USE_OPENMP=OFF -DTRANSCRIBE_USE_SYSTEM_BLAS=OFF \
-  $CPUFLAGS
-"$CMAKE" --build "$BUILD" --config Release -j "$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)"
-"$CMAKE" --install "$BUILD"
-
-# Build PKG_LIBS. Static archives + --start-group sidesteps link ordering entirely
-# on GNU ld; on macOS ld multi-passes so plain listing is fine.
-LIBDIR="$(ls -d "$PREFIX"/lib "$PREFIX"/lib64 2>/dev/null | head -n1)"
-ARCHIVES="$(ls "$LIBDIR"/*.a)"
-OS="$(uname -s)"
-if [ "$OS" = "Darwin" ]; then
-  SYS="-lc++ -framework Accelerate -framework Foundation"
-  PKG_LIBS="$ARCHIVES $SYS"
-else
-  PKG_LIBS="-Wl,--start-group $ARCHIVES -Wl,--end-group -lstdc++ -lm -lpthread -ldl"
-fi
-
-sed -e "s|@PKG_LIBS@|$PKG_LIBS|" \
-    -e "s|@VENDOR@|$VENDOR|" src/Makevars.in > src/Makevars
+nvidia-smi                       # driver version, GPU name, VRAM
+nvcc --version                   # toolkit version
+readlink -f "$(command -v nvcc)" # real path -> decides CUDA_LIBDIR (see below)
+gcc --version && g++ --version   # host compiler
+cmake --version                  # >= 3.18 required by ggml-cuda
+R --version
+R CMD config CXX
+df -h .                          # ~6 GB free for the build tree
+nproc && free -g
 ```
 
-`src/Makevars.in`:
+An RTX 3060 is compute capability **8.6**. Any CUDA 11.1+ toolkit covers it;
+the practical constraint is the *host compiler*, since `nvcc` refuses GCC
+newer than the version its release supports.
 
-```make
-CXX_STD = CXX17
-PKG_CPPFLAGS = -I@VENDOR@/include
-PKG_LIBS = @PKG_LIBS@
-```
+## Step 0 — get the code onto that machine
 
-`cleanup`:
+Nothing is pushed yet: the repo has one commit (`initial commit`) and all the
+backend work is uncommitted in the working tree. On this machine:
 
 ```sh
-#!/bin/sh
-rm -rf src/transcribe-cpp/build src/transcribe-cpp/install src/Makevars
+git switch -c gpu-backends
+git add -A
+git commit -m "Add opt-in Vulkan/CUDA/Metal backends"
+git push -u origin gpu-backends
 ```
 
-`configure.win` / `Makevars.win.in`: same shape under Rtools (UCRT/MinGW). Use
-`cmake -G "MSYS Makefiles"` (or `"MinGW Makefiles"`), R's Rtools `gcc`/`g++`, and
-Windows system libs (`-lstdc++ -lpthread -lbcrypt -ladvapi32`). **Flag Windows as
-the highest‑risk platform** — get Linux + macOS green first, then iterate on
-Windows in CI.
+Then on the CUDA box:
 
-`transcribe-link.json` (at `$PREFIX/lib/transcribe-link.json`) is the
-authoritative source for `libraries`, `system_libs`, `frameworks`, `link_flags`.
-The `--start-group`/glob shortcut above avoids parsing it; if you'd rather be
-exact, parse it in `configure` with `Rscript -e 'jsonlite::...'` (jsonlite is
-present because package Imports are installed before `configure` runs) and emit
-the precise link line — same approach `bindings/rust/sys/build.rs` uses.
-
-`DESCRIPTION` essentials:
-
-```
-LinkingTo:    Rcpp, cli
-Imports:      Rcpp, cli, tibble
-Suggests:     av, testthat (>= 3.0.0)
-SystemRequirements: cmake (>= 3.16), C++17, GNU make
-License:      MIT + file LICENSE
-OS_type:      unix          # drop once configure.win is proven
+```sh
+git clone -b gpu-backends https://github.com/JBGruber/rtranscribe.git
+cd rtranscribe
 ```
 
-`cli` is in `Imports` for progress/messaging; the extra `LinkingTo: cli` is only
-needed if you use cli's **C** progress API for single-run spinners (see the "cli"
-section) — safe to add now and ignore until then.
+Note the vendored tree is now 16 MB, so the clone carries `ggml-cuda`'s 184
+`.cu` files with it — no separate vendoring step is needed there.
 
----
+## Step 1 — pre-flight, without R (2 minutes)
 
-## Step 3 — The Rcpp glue (`src/transcribe_glue.cpp`)
+Do not start a 30-minute package build to discover a toolkit mismatch. Run the
+vendored CMake directly, configure only:
 
-`#include <transcribe/extensions.h>` gives the full surface (transcribe.h + all
-family headers) in one TU. Core patterns:
-
-**Opaque handles → external pointers + finalizers.** Wrap `transcribe_model*` /
-`transcribe_session*` in `Rcpp::XPtr` with a custom finalizer that calls the
-matching free:
-
-```cpp
-static void model_finalizer(transcribe_model* p){ transcribe_model_free(p); }
-static void session_finalizer(transcribe_session* p){ transcribe_session_free(p); }
-// Rcpp::XPtr<transcribe_model>(ptr, model_finalizer)  // no default delete
+```sh
+cmake -S src/transcribe-cpp -B /tmp/cudaprobe \
+  -DTRANSCRIBE_CUDA=ON -DTRANSCRIBE_BUILD_TESTS=OFF \
+  -DTRANSCRIBE_BUILD_EXAMPLES=OFF -DTRANSCRIBE_INSTALL=ON \
+  -DCMAKE_CUDA_ARCHITECTURES=86-real
 ```
 
-**Lifetime ordering (important).** Two paths exist:
-- One‑shot `transcribe_open()` → the session **owns** the model; one finalizer
-  (`session_finalizer`) frees both. Use this for the high‑level `transcribe()`.
-- Reuse: `transcribe_model_load_file()` + `transcribe_session_init()` → session
-  **borrows** the model. R GC order is nondeterministic, so **store the model's
-  XPtr inside the session's S3 object** to keep the model reachable (and thus
-  alive) for as long as any session references it. Free sessions before the model
-  falls out of scope.
+Expected in the output:
 
-**Strings are borrowed — copy at the boundary as UTF‑8.** Every `const char*`
-accessor aliases session storage and dies on the next run/stream mutation. Copy
-immediately with `Rf_mkCharLenCE(s, n, CE_UTF8)` (crucial for non‑English
-transcripts). Never store the raw pointer in an R object.
-
-**Struct init discipline.** Every crossing struct has `uint64_t struct_size` at
-field 0 and *must* be initialized by its `_init()` before use, or the call is
-rejected with `TRANSCRIBE_ERR_BAD_STRUCT_SIZE`. Always call
-`transcribe_*_params_init(&p)` first, then set fields.
-
-**Status → R errors.** Wrap fallible calls in a helper:
-`if (st != TRANSCRIBE_OK) Rcpp::stop("transcribe: %s", transcribe_status_string(st));`
-
-**Audio.** `transcribe_run(sess, pcm, n, params)` wants 16 kHz mono float32 in
-[-1,1]. Glue converts an R `NumericVector` → `std::vector<float>` and passes
-`data()`, `size()`.
-
-**Result marshalling.** After `transcribe_run`, loop the `n_*`/`get_*` accessors
-into data frames and return one `Rcpp::List`:
-
-```cpp
-// segments: bounds-check with transcribe_n_segments() first, then per-row _init + _get_
-// columns: start (s), end (s), text (UTF-8), speaker_id, first_word, n_words, ...
-// words:   start, end, text, seg_index, ...
-// tokens:  id, p (confidence, may be NaN), start, end, text, seg/word index
-// speakers (diarization): start, end, speaker_id, p
-// top-level: full_text, raw_text, language, timestamp_kind, timings(list)
+```
+-- CUDA Toolkit found
+-- Using CMAKE_CUDA_ARCHITECTURES=86-real ...
+-- Including CUDA backend
+-- transcribe install: 0.2.0 shared=OFF backends: cuda;cpu (link manifest: lib/transcribe-link.json)
 ```
 
-Use `transcribe_returned_timestamp_kind()` (authoritative) rather than inferring
-granularity from row counts. Times are `int64_t` ms → divide to seconds in R.
+`backends: cuda;cpu` is the line that matters. If this step fails, jump to the
+failure table — nothing further will work.
 
-**Run/session options** map R args → params structs:
-`task` ("transcribe"/"translate"), `language`, `target_language`, `timestamps`
-("none"/"auto"/"segment"/"word"/"token"), `diarize`/`pnc`/`itn`
-("default"/"off"/"on"), `n_threads`, `kv_type`, `n_ctx`, `backend`, `gpu_device`,
-`keep_special_tags`, `spec_k_drafts`.
+## Step 2 — build the package
 
-**Family extensions** (typed `transcribe_ext` structs): expose R builder helpers
-that carry a kind tag; the run/stream glue fills the matching struct after
-probing `transcribe_model_accepts_ext_kind(model, slot, kind)`:
-- `whisper_options(initial_prompt=, temperature=, temperature_inc=, no_speech_thold=, seed=, ...)` → `transcribe_whisper_run_ext` (RUN slot)
-- `parakeet_stream_options(att_context_right=)`, `parakeet_buffered_stream_options(left_ms=, chunk_ms=, right_ms=)`, `moonshine_streaming_options(min_decode_interval_ms=)`, `voxtral_realtime_options(num_delay_tokens=, min_decode_interval_ms=)` → STREAM slot.
+Two things to get right, both of which cost 20+ minutes if missed:
 
-**Streaming.** Streaming is a *mode on the session*, not a new handle. The stream
-S3 object wraps the same session XPtr. Glue: `transcribe_stream_begin` →
-`transcribe_stream_feed(pcm)` returning an update list → `transcribe_stream_text`
-(return committed/tentative/full — use the **stable** `committed_text`, treat
-`tentative_text` as volatile) → `transcribe_stream_finalize` /
-`transcribe_stream_reset`; plus `transcribe_stream_get_state`.
+- **`./cleanup` first.** A stale `src/rtranscribe.so` is reused by `make`
+  (`AGENTS.md` records this trap) — on a fresh clone it is moot, but it matters
+  on every rebuild after.
+- **Pin the architecture.** `configure` passes `-DGGML_NATIVE=OFF` for CPU
+  portability, which makes ggml fall into its *fat* default arch list
+  (`50-virtual;61-virtual;70-virtual;75-virtual;80-virtual;86-real;89-real;90-virtual`,
+  more on newer toolkits — `ggml/src/ggml-cuda/CMakeLists.txt:25-56`). That
+  compiles 184 `.cu` files for eight architectures when one is wanted.
+  `TRANSCRIBE_R_CUDA_ARCHS=86-real` is effectively mandatory.
 
-**Cancellation via Ctrl‑C (advanced, later phase).** Install an abort callback
-that reports whether an R interrupt is pending, tested *safely* with the
-`R_ToplevelExec(check_interrupt_fn, ...)` trampoline pattern (so the check never
-long‑jumps out of C). This makes long transcriptions interruptible — a genuine
-first‑class touch. Ship a first version without it.
+```sh
+mkdir -p /tmp/rt-lib
+./cleanup
+TRANSCRIBE_R_CUDA=1 \
+TRANSCRIBE_R_CUDA_ARCHS=86-real \
+TRANSCRIBE_R_JOBS=$(nproc) \
+  R CMD INSTALL --library=/tmp/rt-lib . 2>&1 | tee /tmp/install-cuda.log
+```
 
-**Logging (advanced).** `transcribe_log_set` may fire from worker threads —
-**never call R from the callback**. Buffer messages under a mutex and flush via
-`message()` after the run returns, or just wire a verbosity level.
+Expect the configure banner to say:
 
-Run `Rcpp::compileAttributes()` to generate `RcppExports.cpp` +
-`R/RcppExports.R`. In `.onLoad`, call `transcribe_init_backends_default()` once
-and check status (idempotent; for the static CPU build it simply readies the
-compiled‑in CPU backend).
+```
+*** rtranscribe: CUDA backend ENABLED (nvcc: /usr/local/cuda/bin/nvcc)
+*** rtranscribe: the CUDA build has not been tested by the package authors;
+```
 
----
+Rough budget: 10–25 minutes for one architecture on 8+ cores. `nvcc` is
+memory-hungry — if the machine has less than ~2 GB of RAM per job, lower
+`TRANSCRIBE_R_JOBS` rather than letting the OOM killer pick a victim.
 
-## Step 4 — The R API (functional / S3)
+## Step 3 — verify the link, not just the exit code
 
-**High‑level, one call:**
+`R CMD INSTALL` exiting 0 is not evidence the CUDA archive was linked. Check
+the actual command:
+
+```sh
+grep -- "-o rtranscribe.so" /tmp/install-cuda.log
+```
+
+It must contain `libggml-cuda.a` inside the `--start-group` set, and
+`-lcudart -lcublas -lcuda` after it (that is the `configure:313-321` fixup).
+For comparison, the verified Vulkan line on the AMD box was:
+
+```
+... --start-group libtranscribe.a libggml.a libggml-cpu.a libggml-vulkan.a libggml-base.a --end-group \
+    -Wl,--exclude-libs,ALL -lstdc++ -lm -lpthread -ldl -lvulkan ...
+```
+
+Then confirm the runtime dependencies resolved:
+
+```sh
+ldd /tmp/rt-lib/rtranscribe/libs/rtranscribe.so | grep -Ei "cuda|cublas"
+```
+
+`libcudart.so.*`, `libcublas.so.*` and `libcuda.so.1` should all appear and
+none should say `not found`.
+
+## Step 4 — runtime smoke test
 
 ```r
-transcribe(audio, model, task = "transcribe", language = NULL,
-           timestamps = "auto", diarize = FALSE, n_threads = NULL, ...)
-# audio: numeric PCM (16 kHz mono) OR a file path (decoded via transcribe_read_audio)
-# model: a path to a .gguf OR a transcribe_model object
-# -> S3 "transcribe_result": $text, $segments, $words, $tokens, $speakers,
-#    $language, $timings ; print()/format()/as.data.frame() methods
+.libPaths(c("/tmp/rt-lib", .libPaths()))
+library(rtranscribe)
+
+transcribe_devices()                      # expect an RTX 3060 row, kind "cuda"
+transcribe_backend_available("cuda")       # TRUE
 ```
 
-**Low‑level, reusable:**
+`transcribe_devices()$memory_total` is a free sanity check on which 3060 this
+is — 12 GB desktop or 6 GB laptop.
+
+Then prove it computes, and that it computes the *same thing* as the CPU:
 
 ```r
-m    <- transcribe_load_model(path, backend = "auto", gpu_device = 0L)
-caps <- transcribe_capabilities(m)          # data frame / list
-transcribe_supports(m, "diarization")        # feature probe
-s    <- transcribe_session(m, n_threads = 4L, kv_type = "auto", n_ctx = NULL)
-res  <- transcribe_run(s, pcm, task = "transcribe", timestamps = "word",
-                       diarize = TRUE, family = whisper_options(initial_prompt = "..."))
-res_batch <- transcribe_run_batch(s, list(pcm1, pcm2), ...)   # per-utterance results
+wav <- system.file("extdata/jfk.wav", package = "rtranscribe")
+mp  <- transcribe_download_model("whisper-tiny")
 
-st <- transcribe_stream_begin(s, family = moonshine_streaming_options())
-upd <- transcribe_stream_feed(st, pcm_chunk)
-txt <- transcribe_stream_text(st)            # committed / tentative / full
-transcribe_stream_finalize(st); transcribe_stream_reset(st)
-
-transcribe_tokenize(m, "hello world")
-transcribe_backends(); transcribe_backend_available("cuda"); transcribe_devices()
+for (b in c("cpu", "cuda")) {
+  t0  <- Sys.time()
+  m   <- transcribe_load_model(mp, backend = b)
+  res <- transcribe(wav, m)
+  cat(sprintf("%-5s %5.2fs  %s\n", b, as.numeric(Sys.time() - t0, "secs"), res$text))
+}
 ```
 
-**Audio helper** (`av` in Suggests; error with guidance if missing):
+Compare the two transcripts by eye rather than with `identical()`: GPU and CPU
+kernels differ numerically, so a word may legitimately differ. A *wildly*
+different or empty CUDA transcript means a real bug — report it with the model
+name and the clip.
+
+Watch `nvidia-smi dmon -s um` in a second terminal during the run. If GPU
+utilisation stays at zero, the model may have fallen back to the CPU — printing
+`m` shows the backend it actually got (`transcribe_model_info(m)$backend` gives
+it directly). Note that `backend = "cuda"` is an assertion and errors rather
+than falling back, so a silent fallback is only possible under `"auto"`.
+
+## Step 5 — a workload where the GPU should actually win
+
+`jfk.wav` is 11 seconds; on that scale model loading dominates. Use a real
+file and a real model:
 
 ```r
-transcribe_read_audio(path, sample_rate = 16000)  # -> numeric vector, mono, [-1,1]
+mp <- transcribe_download_model("whisper-large-v3-turbo")   # 845 MB
+m  <- transcribe_load_model(mp, backend = "cuda")
+s  <- transcribe_session(m)
+system.time(res <- transcribe_run(s, "some-long-interview.mp3"))
+res
 ```
 
-**Model management** (cache in `tools::R_user_dir(pkg, "cache")`):
+The result print shows the real-time factor. Record CPU and CUDA numbers for
+the same file — that is the number worth putting in the README, and it is the
+only thing here that justifies the whole exercise to a user.
+
+## Step 6 — the path users will actually take
+
+This is the question that started all of this, so test it as a user would,
+with no clone in sight:
 
 ```r
-transcribe_download_model(name_or_url, dest = <cache>)  # utils::download.file/curl
-transcribe_model_info(path)   # via transcribe_model_meta_val_str / arch / variant
+# ~/.Renviron:
+#   TRANSCRIBE_R_CUDA=1
+#   TRANSCRIBE_R_CUDA_ARCHS=86-real
+pak::pak("JBGruber/rtranscribe@gpu-backends")
 ```
-Seed a small registry of public GGUF URLs; document "bring your own .gguf".
 
-### C‑ABI → R surface map (target: most/all)
+Confirm it picks the variables up. `pak` builds in a background worker that
+inherits the environment at *process start*, which is exactly why the README
+says to use `~/.Renviron` rather than `Sys.setenv()` — if that turns out to be
+wrong in either direction, the README needs the correction.
 
-| Area | C functions | R surface |
-|---|---|---|
-| init/version | `transcribe_init_backends_default`, `transcribe_version[_commit]` | `.onLoad`; `transcribe_version()` |
-| model | `transcribe_model_load_file`, `transcribe_open`, `_free`, `_get_capabilities`, `_supports`, `_arch/variant/backend_string`, `_meta_val_str`, `_get_device` | `transcribe_load_model`, `transcribe_capabilities`, `transcribe_supports`, `transcribe_model_info`, S3 `print` |
-| session | `transcribe_session_init/_free`, `_get_limits` | `transcribe_session`, `transcribe_session_limits` |
-| run | `transcribe_run`, `transcribe_run_batch` | `transcribe_run`, `transcribe_run_batch`, `transcribe()` |
-| results | `transcribe_full_text/_raw_text/_detected_language`, `n_/get_ segment/word/token`, `returned_timestamp_kind`, `n_/get_ speaker_segment`, `get_timings` | data frames inside `transcribe_result` |
-| streaming | `transcribe_stream_begin/feed/finalize/reset/get_text/get_state/revision/last_status` | `transcribe_stream_*` |
-| families | `transcribe_model_accepts_ext_kind`, `*_ext_init` | `whisper_options`, `parakeet_stream_options`, `parakeet_buffered_stream_options`, `moonshine_streaming_options`, `voxtral_realtime_options` |
-| tokenize | `transcribe_tokenize` | `transcribe_tokenize` |
-| devices | `transcribe_backend_available`, `_backend_device_count`, `_get_backend_device` | `transcribe_backends`, `transcribe_devices` |
-| cancel (later) | `transcribe_set_abort_callback`, `_was_aborted/_truncated` | Ctrl‑C via `R_ToplevelExec` |
-| logging (later) | `transcribe_log_set` | `transcribe_set_verbosity` (buffered) |
+## Step 7 — the gated test suite
 
----
+```sh
+export RTRANSCRIBE_TEST_MODEL=~/.cache/R/rtranscribe/whisper-tiny-Q8_0.gguf
+export RTRANSCRIBE_TEST_STREAM_MODEL=~/.cache/R/rtranscribe/moonshine-streaming-tiny-Q8_0.gguf
+R -e 'devtools::load_all(); devtools::test()'
+```
 
-## Build order (phases)
+Note this runs against a `load_all()` build, so it exercises whatever
+`src/rtranscribe.so` currently is — the CUDA one, if Step 2 was the last build.
+The suite is backend-agnostic; a failure here is a genuine regression, not a
+CUDA quirk. One test skips itself on a CUDA build by design
+(`tests/testthat/test-handles.R:33`).
 
-0. **Skeleton + build green.** Package skeleton, `tools/vendor.sh` run once,
-   `configure`/`Makevars.in`, one exported glue fn returning
-   `transcribe_version()`. `R CMD INSTALL` succeeds on Linux.
-1. **Load + one‑shot text.** `transcribe_load_model`/`transcribe_open`,
-   `transcribe_run`, return `full_text`. Prove end‑to‑end on `inst/extdata/jfk.wav`.
-2. **Full results + options.** segments/words/tokens/language/timings/raw_text
-   data frames; task/language/timestamps/pnc/itn args; S3 print/as.data.frame.
-3. **Diarization** (`diarize=`, speaker segments, `segment$speaker_id`).
-4. **Batch** (`transcribe_run_batch`, per‑utterance statuses).
-5. **Streaming** (begin/feed/finalize/reset/text/state).
-6. **Family extensions** (whisper run opts; parakeet/moonshine/voxtral stream opts).
-7. **Ergonomics:** `transcribe_read_audio` (av), model download/cache, high‑level
-   `transcribe()`, tibble results + print/format methods, and R‑level cli
-   progress/messaging (batch, streaming, download — see the cli section).
-8. **Cancellation (Ctrl‑C) + logging + device selection.**
-9. **Docs + tests + CI + r‑universe** (roxygen2 man pages, README, testthat,
-   `.github/workflows` R‑CMD‑check with `apt/brew install cmake`, r‑universe config).
+## Step 8 — stretch goals, in value order
 
----
+1. **Diarization, finally.** It has never been verified end to end because the
+   smallest diarization-capable model is over 1 GB — which is precisely the
+   constraint a 12 GB GPU removes. Find one with
+   `transcribe_models(refresh = TRUE)`, confirm with
+   `transcribe_supports(m, "diarization")`, then run with `diarize = TRUE` and
+   check `res$speakers` and `res$segments$speaker_id`. This would close the
+   oldest open item in `AGENTS.md`.
+2. **Ctrl-C during a GPU run.** The interrupt path re-raises after the native
+   call unwinds; nothing about it is CUDA-specific, but a long GPU run is the
+   easiest way to test it honestly.
+3. **Streaming on CUDA** with `moonshine-streaming-tiny` via
+   `transcribe_stream_all()`.
+4. **`R CMD check`** on the CUDA build, for the same NOTEs as elsewhere.
+5. **`gpu_device`** selection, only if that machine has a second GPU.
 
-## Verification
+## Failures worth anticipating
 
-- **Build:** `R CMD INSTALL .` on Linux (then macOS, then Windows). Confirm the
-  package `.so` links the static archives (no runtime dependency on
-  `libtranscribe`).
-- **Smoke (Phase 1+):**
-  ```r
-  library(rtranscribe)
-  transcribe_version()
-  m <- transcribe_load_model("~/models/<some>.gguf")
-  pcm <- transcribe_read_audio(system.file("extdata/jfk.wav", package = "rtranscribe"))
-  res <- transcribe(pcm, m)
-  stopifnot(nchar(res$text) > 0); head(res$segments)
-  ```
-- **Encoding:** transcribe a non‑English clip; assert UTF‑8 is preserved
-  (`Encoding(res$text) == "UTF-8"`, correct glyphs).
-- **testthat:** small model downloaded on demand behind an env flag
-  (`skip_if(Sys.getenv("RTRANSCRIBE_TEST_MODEL") == "")`), plus offline unit
-  tests for arg→enum mapping and tibble shapes. Ship a short 16 kHz
-  `inst/extdata/jfk.wav`.
-- **`R CMD check --as-cran`** for hygiene (expect notes about compile time /
-  cmake — acceptable off‑CRAN).
-- **Provenance:** confirm `src/transcribe-cpp/VENDOR` records the upstream SHA +
-  abihash; re‑running `tools/vendor.sh <url> <newtag>` cleanly re‑vendors.
+| Symptom | Cause | Fix |
+| --- | --- | --- |
+| `unsupported GNU version! gcc versions later than N are not supported` | `nvcc` rejects the host compiler. ggml honours `CMAKE_CUDA_HOST_COMPILER` (`ggml/src/ggml-cuda/CMakeLists.txt:219-220`) but `configure` has no knob for it | Add one — in the CUDA block of `configure`, `CUDA_EXTRA="$CUDA_EXTRA -DCMAKE_CUDA_HOST_COMPILER=${TRANSCRIBE_R_CUDA_HOST_CC}"` when that variable is set — then build with `TRANSCRIBE_R_CUDA_HOST_CC=/usr/bin/g++-13`. Land the knob afterwards |
+| `undefined reference to cudaMalloc` / `cublasSgemm` at the final link | The `configure:313-321` fixup did not find the libraries | Check what `CUDA_ROOT` resolved to: `configure:192` takes `dirname(dirname($NVCC))`, which is right for `/usr/local/cuda/bin/nvcc` and wrong if `nvcc` is a symlink into `/etc/alternatives`. Workaround: `CUDACXX=/usr/local/cuda/bin/nvcc`. Fix: `readlink -f` in `configure` |
+| Build runs for an hour | `TRANSCRIBE_R_CUDA_ARCHS` was not set, so the fat arch list is in play | Set `86-real`. Consider making `configure` default to `native` when CUDA is on, since a CUDA build is inherently machine-specific |
+| Compiler killed / machine swaps | `nvcc` memory use × `TRANSCRIBE_R_JOBS` | Lower the job count |
+| `transcribe_devices()` shows no CUDA row | Driver/runtime mismatch, or the archive was not linked | `nvidia-smi` first, then Step 3's `ldd` check |
+| `backend = "cuda"` errors with "No cuda device is available" | Same as above; the R-level check fires before loading | The error text already distinguishes the two causes (`R/model.R:44-51`) |
+| Output is empty or garbled on CUDA only | A real upstream bug | Capture model, clip, toolkit version and `transcribe_set_verbosity("debug")` output; this belongs upstream at handy-computer/transcribe.cpp |
 
-## Progress, messaging & errors (`cli`)
+## What to send back
 
-Use **cli** for all user-facing status, progress, and errors. cli ships a
-C-level progress API too, so there are two integration levels — use the R level
-by default and reach for C only where it is actually needed.
+- `/tmp/install-cuda.log` (or just the `-o rtranscribe.so` line plus any error)
+- the Step 1 CMake output
+- the `ldd` output from Step 3
+- the R console from Steps 4–5, including `transcribe_devices()` and both timings
+- the versions collected in Prerequisites
 
-**R-level (default; `Imports: cli`, no `LinkingTo`).** Covers every case where the
-loop lives in R, which is most of them, and is fully main-thread-safe:
+## What lands after a green run
 
-- **Batch / multi-file:** one `cli::cli_progress_bar()` in the R loop over files
-  (or over `transcribe_run_batch` inputs) with `cli_progress_update()` per file —
-  a determinate percentage.
-- **Streaming:** a determinate bar driven by fed-ms / total-ms in the
-  `transcribe_stream_feed()` loop.
-- **Model download:** cli's built-in download handler.
-- **Status / warnings / errors:** `cli_alert_info/success/warning`, and
-  `cli_abort()` for rich errors (replace the bare `Rcpp::stop`/`stop()`),
-  interpolating `transcribe_status_string()` into the message.
+Small and mechanical, all of it currently phrased as "untested":
 
-**C-level (optional; add `LinkingTo: cli`, `#include <cli/progress.h>`).** Needed
-only to animate a progress indicator *inside a single blocked `transcribe_run()`*,
-where R never regains control mid-call. cli exposes exactly this: the
-`CLI_SHOULD_TICK` macro (a cheap global-timer check for hot loops) plus
-`cli_progress_bar()`, `cli_progress_update()/_set()/_add()`,
-`cli_progress_set_name()/_status()/_format()`, and `cli_progress_done()` (see
-cli's "progress bars in C/C++" article for exact signatures). Three constraints
-that matter here:
+- `configure:198-199` — drop the two "has not been tested by the package
+  authors" lines for CUDA.
+- `README.md` — replace "only Vulkan has been tested here" with the CUDA
+  numbers from Step 5, and document `TRANSCRIBE_R_CUDA_ARCHS` as a build-time
+  necessity rather than a footnote.
+- `AGENTS.md` — the "Verified: CPU and Vulkan" line in the GPU backends
+  section, and the CPU/GPU bullet under State and limitations.
+- `NEWS.md` — "Only the CPU and Vulkan builds have been tested".
+- Whichever contingency knobs Step 2 actually needed (`readlink -f`,
+  `TRANSCRIBE_R_CUDA_HOST_CC`, a `native` arch default).
+- If diarization worked: retire that limitation everywhere it is recorded, and
+  add a test guarded by a new `RTRANSCRIBE_TEST_DIARIZE_MODEL` env var.
 
-- These functions **re-enter R**, so they are **R-main-thread only** — call them
-  only from a hook running on the calling thread, and **never** from
-  transcribe.cpp's log callback (which may fire on ggml worker threads).
-- The only in-C hook during an offline run is the **abort callback** (already
-  used for Ctrl-C). Confirm empirically that it fires on the calling thread, then
-  piggyback `CLI_SHOULD_TICK` + a tick on it.
-- That callback carries **no progress fraction**, so a single offline run can
-  only show an **indeterminate spinner**, not a percentage. A determinate
-  single-run bar would need an upstream progress-callback addition (worth a
-  feature request to transcribe.cpp).
-
-Recommendation: do R-level cli first — it already delivers nice progress for
-batch, streaming, and downloads plus all messaging — and only add the C-API
-spinner for long single runs if it earns its keep.
-
-## Backends / GPU strategy (the binding is *not* CPU-locked)
-
-Only the *default build* is CPU-only. The binding itself is backend-agnostic:
-`transcribe_load_model(backend=, gpu_device=)` and `transcribe_backend_available()`
-are already in the API, and enabling a GPU is purely a build-configuration choice
-— **no glue or R change**. Peer bindings ship the same way (Python's default is
-CPU, CUDA is a heavy opt-in provider wheel; Rust's GPU is off-by-default Cargo
-features). Staged:
-
-- **Milestone 1 — CPU** (static, conservative baseline). Ships everywhere, source
-  and r-universe binaries.
-- **Vulkan (later)** — broad cross-vendor GPU (NVIDIA/AMD/Intel) without a CUDA
-  toolkit. Needs the `GGML_BACKEND_DL` posture: a *shared* build shipping the
-  Vulkan backend as a loadable module, placed via `install.libs.R` and pointed at
-  with `transcribe_init_backends(module_dir)`. Best fit for prebuilt binaries.
-- **CUDA (later, opt-in)** — best NVIDIA perf, heaviest. Source-install opt-in:
-  `TRANSCRIBE_R_CUDA=1 R CMD INSTALL` flips `-DTRANSCRIBE_CUDA=ON`; needs the
-  toolkit at build and a driver/runtime at run. Not for default binaries; never
-  CRAN.
-- **macOS Metal — deferred** (no Mac to test on). A build-flag flip, not a code
-  change: keep `ggml-metal` in the vendor and pass `-DTRANSCRIBE_METAL=ON` on
-  arm64 when a Mac tester appears.
-
-## Staged path to CRAN (r-universe first, then CRAN)
-
-The R API, the Rcpp glue, and the vendored source are all
-build-strategy-independent, so the eventual CRAN move is a contained
-**build-layer swap, not a rewrite**. Keep it cheap:
-
-- Freeze the true one-way doors now: **name (`rtranscribe`), MIT license, public
-  function syntax** — far more expensive to change once people depend on them.
-- Keep all R behavior independent of how the native lib was built (already the
-  design).
-- Prune the vendored tree hard (CRAN source-size limits).
-- Have `vendor.sh` *also* emit the explicit upstream source list (upstream lists
-  sources, not globs) so a `Makevars` port is copy-paste, not archaeology.
-- Honor CRAN's "write only inside build dirs" rule in `configure` from day one.
-
-The real CRAN gates are **source size, compile/check time (200+ TUs), and
-platform portability** — not the build tool. cmake-in-`configure` is
-discouraged-but-accepted by CRAN, so the change may be "get cmake through review"
-or "swap to a `Makevars` source list (conservative CPU baseline)"; either way the
-R and glue layers are untouched. Precedent: **duckdb** ships a large vendored C++
-tree on CRAN via a generated `Makevars` source list, and **audio.whisper**
-(bnosac) vendors ggml/whisper.cpp on GitHub — both patterns are well-trodden.
-
-## Resolved decisions
-
-- **Package name:** `rtranscribe`.
-- **Result container:** `tibble` — the glue returns base data frames; the S3
-  result constructor wraps them with `tibble::as_tibble()` (`tibble` in Imports).
-- **Progress / messaging:** `cli` — R-level everywhere; optional C-API spinner for
-  single long runs (see the cli section).
-- **macOS Metal:** skipped for now (no Mac to test); revisit as a build-flag flip.
-- **CPU portability:** `TRANSCRIBE_X86_CONSERVATIVE=ON` for distributed binaries;
-  `TRANSCRIBE_R_NATIVE=1` opts into `-march=native` for local source installs.
+No CI change: GitHub's standard runners have neither a CUDA toolkit nor a GPU,
+so the `vulkan-build` job stays the only compiled-backend job. CUDA remains
+verified by hand, on that machine, at each upstream re-vendor.

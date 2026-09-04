@@ -1,3 +1,6 @@
 #!/bin/sh
 rm -rf src/transcribe-cpp/build src/transcribe-cpp/install
 rm -f src/Makevars.win
+# See the note in `cleanup`: a stale rtranscribe.dll keeps the previous backend
+# set alive across a reinstall.
+rm -f src/*.o src/*.dll

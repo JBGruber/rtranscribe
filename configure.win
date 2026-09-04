@@ -43,6 +43,51 @@ fi
 
 NJOBS="${TRANSCRIBE_R_JOBS:-2}"
 
+# GPU backends: same opt-in knobs as the POSIX configure, minus Metal. Both are
+# even less proven than the rest of this script.
+VULKAN_FLAG="-DTRANSCRIBE_VULKAN=OFF"
+CUDA_FLAG="-DTRANSCRIBE_CUDA=OFF"
+CUDA_EXTRA=""
+GPU_LIBS=""
+
+if [ "${TRANSCRIBE_R_VULKAN:-0}" = "1" ]; then
+  if [ ! -d "${VENDOR}/ggml/src/ggml-vulkan" ]; then
+    echo "ERROR: TRANSCRIBE_R_VULKAN=1 but ${VENDOR}/ggml/src/ggml-vulkan is missing;" >&2
+    echo "       add it to the allowlist in tools/vendor.sh and re-vendor." >&2
+    exit 1
+  fi
+  GLSLC="${Vulkan_GLSLC_EXECUTABLE:-$(command -v glslc 2>/dev/null || true)}"
+  if [ -z "$GLSLC" ]; then
+    echo "ERROR: TRANSCRIBE_R_VULKAN=1 needs the Vulkan SDK and glslc on the PATH." >&2
+    exit 1
+  fi
+  VULKAN_FLAG="-DTRANSCRIBE_VULKAN=ON"
+  GPU_LIBS="$GPU_LIBS -lvulkan-1"
+fi
+
+if [ "${TRANSCRIBE_R_CUDA:-0}" = "1" ]; then
+  if [ ! -d "${VENDOR}/ggml/src/ggml-cuda" ]; then
+    echo "ERROR: TRANSCRIBE_R_CUDA=1 but ${VENDOR}/ggml/src/ggml-cuda is missing;" >&2
+    echo "       add it to the allowlist in tools/vendor.sh and re-vendor." >&2
+    exit 1
+  fi
+  NVCC="${CUDACXX:-$(command -v nvcc 2>/dev/null || true)}"
+  if [ -z "$NVCC" ]; then
+    echo "ERROR: TRANSCRIBE_R_CUDA=1 needs the CUDA toolkit (nvcc) on the PATH." >&2
+    exit 1
+  fi
+  CUDA_FLAG="-DTRANSCRIBE_CUDA=ON"
+  CUDA_EXTRA="-DCMAKE_CUDA_COMPILER=$NVCC"
+  if [ -n "${TRANSCRIBE_R_CUDA_ARCHS:-}" ]; then
+    CUDA_EXTRA="$CUDA_EXTRA -DCMAKE_CUDA_ARCHITECTURES=${TRANSCRIBE_R_CUDA_ARCHS}"
+  fi
+  CUDA_ROOT="$(dirname "$(dirname "$NVCC")")"
+  # ggml-cuda's own dependencies are PRIVATE to that target, so they are absent
+  # from the link manifest — see the same fixup in `configure`.
+  [ -d "$CUDA_ROOT/lib/x64" ] && GPU_LIBS="$GPU_LIBS -L$CUDA_ROOT/lib/x64"
+  GPU_LIBS="$GPU_LIBS -lcudart -lcublas -lcuda"
+fi
+
 "$CMAKE" -S "$VENDOR" -B "$BUILD" -G "MSYS Makefiles" \
   -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_C_COMPILER="$CC_BIN" \
@@ -56,6 +101,7 @@ NJOBS="${TRANSCRIBE_R_JOBS:-2}"
   -DTRANSCRIBE_USE_OPENMP=OFF \
   -DTRANSCRIBE_USE_SYSTEM_BLAS=OFF \
   -DGGML_CCACHE=OFF \
+  $VULKAN_FLAG $CUDA_FLAG $CUDA_EXTRA \
   $CPUFLAGS
 
 "$CMAKE" --build "$BUILD" --config Release -j "$NJOBS"
@@ -84,7 +130,7 @@ if [ -z "$ARCHIVES" ]; then
   exit 1
 fi
 
-PKG_LIBS="-Wl,--start-group ${ARCHIVES} -Wl,--end-group -lstdc++ -lpthread -lbcrypt -ladvapi32"
+PKG_LIBS="-Wl,--start-group ${ARCHIVES} -Wl,--end-group -lstdc++ -lpthread -lbcrypt -ladvapi32${GPU_LIBS}"
 VENDOR_INC="${PWD}/${VENDOR}/include"
 
 sed -e "s|@PKG_LIBS@|${PKG_LIBS}|" \

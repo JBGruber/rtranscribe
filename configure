@@ -10,7 +10,15 @@
 #                           the resulting binary is NOT portable to other CPUs)
 #   TRANSCRIBE_R_JOBS=N     parallel compile jobs (default: detected core count)
 #   CMAKE                   path to a cmake binary to use
+#
+#   TRANSCRIBE_R_VULKAN=1   compile in the Vulkan backend (AMD/Intel/NVIDIA)
+#   TRANSCRIBE_R_CUDA=1     compile in the CUDA backend (NVIDIA)
+#   TRANSCRIBE_R_METAL=1    compile in the Metal backend (Apple Silicon)
+#   TRANSCRIBE_R_CUDA_ARCHS pass-through for CMAKE_CUDA_ARCHITECTURES
+#                           (default: upstream's, which is "native")
 set -e
+
+OS="$(uname -s)"
 
 : "${R_HOME:?R_HOME is not set; run this via R CMD INSTALL}"
 RBIN="${R_HOME}/bin/R"
@@ -75,6 +83,134 @@ else
   CPUFLAGS="-DTRANSCRIBE_X86_CONSERVATIVE=ON -DGGML_NATIVE=OFF"
 fi
 
+# --------------------------------------------------------------------------
+# GPU backends.
+#
+# All three are OFF by default and that is a distribution decision, not a
+# capability one: the CPU build needs nothing but a compiler, while each of
+# these needs an SDK at build time and matching hardware plus drivers at run
+# time, so none of them can be in a binary that has to install everywhere.
+# Opt in per install:
+#
+#   TRANSCRIBE_R_VULKAN=1 R CMD INSTALL .
+#   TRANSCRIBE_R_CUDA=1   R CMD INSTALL .
+#   TRANSCRIBE_R_METAL=1  R CMD INSTALL .
+#
+# Nothing above the build changes: the compiled-in set is what
+# transcribe_load_model(backend=) can accept, and the devices it finds are what
+# transcribe_devices() lists. More than one may be enabled at once.
+#
+# The sources have to be in the tarball for any of this to work — see the
+# allowlist in tools/vendor.sh, which is the other half of this switch.
+# --------------------------------------------------------------------------
+VULKAN_FLAG="-DTRANSCRIBE_VULKAN=OFF"
+CUDA_FLAG="-DTRANSCRIBE_CUDA=OFF"
+METAL_FLAG="-DTRANSCRIBE_METAL=OFF"
+CUDA_EXTRA=""
+CUDA_LIBDIR=""
+
+require_backend_sources() {
+  # $1 = env knob name, $2 = ggml backend directory
+  [ -d "${VENDOR}/ggml/src/$2" ] && return 0
+  cat >&2 <<EOF
+------------------------------ ERROR ------------------------------
+$1=1 was set, but this source tree does not contain
+  ${VENDOR}/ggml/src/$2
+
+The backend sources are pruned by an allowlist when the tree is
+vendored. Add '$2' to the allowlist in tools/vendor.sh and
+re-run it, or install without $1.
+-------------------------------------------------------------------
+EOF
+  exit 1
+}
+
+if [ "${TRANSCRIBE_R_VULKAN:-0}" = "1" ]; then
+  require_backend_sources TRANSCRIBE_R_VULKAN ggml-vulkan
+
+  # ggml-vulkan's CMake does find_package(Vulkan COMPONENTS glslc REQUIRED) and
+  # compiles its shaders with glslc at build time, so both the loader headers
+  # and the compiler must be present. Probe here rather than letting CMake fail
+  # a hundred lines into the configure output.
+  GLSLC="${Vulkan_GLSLC_EXECUTABLE:-$(command -v glslc 2>/dev/null || true)}"
+  VULKAN_HEADERS=0
+  printf '#include <vulkan/vulkan.h>\nint main(void){return 0;}\n' > conftest.c
+  if "$CC_BIN" -c conftest.c -o conftest.o >/dev/null 2>&1; then
+    VULKAN_HEADERS=1
+  fi
+  rm -f conftest.c conftest.o
+
+  if [ -z "$GLSLC" ] || [ "$VULKAN_HEADERS" != "1" ]; then
+    cat >&2 <<EOF
+------------------------------ ERROR ------------------------------
+TRANSCRIBE_R_VULKAN=1 needs the Vulkan headers and the glslc shader
+compiler at build time.
+  vulkan/vulkan.h found: $([ "$VULKAN_HEADERS" = "1" ] && echo yes || echo no)
+  glslc found:           ${GLSLC:-no}
+
+  Debian/Ubuntu:  sudo apt-get install libvulkan-dev glslc
+  Fedora:         sudo dnf install vulkan-loader-devel glslc
+  Arch:           sudo pacman -S vulkan-headers vulkan-icd-loader shaderc
+  macOS:          the Vulkan SDK (MoltenVK) — or use TRANSCRIBE_R_METAL=1
+
+A Vulkan driver for the GPU is needed at run time as well; without one
+the backend simply reports no devices and the CPU path is used.
+-------------------------------------------------------------------
+EOF
+    exit 1
+  fi
+
+  VULKAN_FLAG="-DTRANSCRIBE_VULKAN=ON"
+  echo "*** rtranscribe: Vulkan backend ENABLED (glslc: $GLSLC)"
+fi
+
+if [ "${TRANSCRIBE_R_CUDA:-0}" = "1" ]; then
+  require_backend_sources TRANSCRIBE_R_CUDA ggml-cuda
+
+  NVCC="${CUDACXX:-$(command -v nvcc 2>/dev/null || true)}"
+  if [ -z "$NVCC" ]; then
+    cat >&2 <<EOF
+------------------------------ ERROR ------------------------------
+TRANSCRIBE_R_CUDA=1 needs the CUDA toolkit (nvcc) at build time and it
+was not found on the PATH.
+
+Install the toolkit from your distribution or from
+https://developer.nvidia.com/cuda-downloads, then either put nvcc on
+the PATH or point at it with CUDACXX=/path/to/nvcc.
+-------------------------------------------------------------------
+EOF
+    exit 1
+  fi
+
+  CUDA_FLAG="-DTRANSCRIBE_CUDA=ON"
+  CUDA_EXTRA="-DCMAKE_CUDA_COMPILER=$NVCC"
+  if [ -n "${TRANSCRIBE_R_CUDA_ARCHS:-}" ]; then
+    CUDA_EXTRA="$CUDA_EXTRA -DCMAKE_CUDA_ARCHITECTURES=${TRANSCRIBE_R_CUDA_ARCHS}"
+  fi
+
+  # Where the CUDA runtime libraries live, for the link-line fixup below.
+  CUDA_ROOT="$(dirname "$(dirname "$NVCC")")"
+  for d in "$CUDA_ROOT/lib64" "$CUDA_ROOT/lib"; do
+    [ -d "$d" ] && CUDA_LIBDIR="$d" && break
+  done
+
+  echo "*** rtranscribe: CUDA backend ENABLED (nvcc: $NVCC)"
+  echo "*** rtranscribe: the CUDA build has not been tested by the package authors;"
+  echo "*** rtranscribe: please report success or failure"
+fi
+
+if [ "${TRANSCRIBE_R_METAL:-0}" = "1" ]; then
+  if [ "$OS" != "Darwin" ]; then
+    echo "ERROR: TRANSCRIBE_R_METAL=1 is macOS-only (this is $OS)." >&2
+    exit 1
+  fi
+  require_backend_sources TRANSCRIBE_R_METAL ggml-metal
+  METAL_FLAG="-DTRANSCRIBE_METAL=ON"
+  echo "*** rtranscribe: Metal backend ENABLED"
+  echo "*** rtranscribe: the Metal build has not been tested by the package authors;"
+  echo "*** rtranscribe: please report success or failure"
+fi
+
 if [ -n "${TRANSCRIBE_R_JOBS:-}" ]; then
   NJOBS="$TRANSCRIBE_R_JOBS"
 else
@@ -95,8 +231,8 @@ echo "*** rtranscribe: configuring bundled transcribe.cpp (cmake: $CMAKE)"
   -DTRANSCRIBE_BUILD_TOOLS=OFF \
   -DTRANSCRIBE_USE_OPENMP=OFF \
   -DTRANSCRIBE_USE_SYSTEM_BLAS=OFF \
-  -DTRANSCRIBE_METAL=OFF \
   -DGGML_CCACHE=OFF \
+  $VULKAN_FLAG $CUDA_FLAG $METAL_FLAG $CUDA_EXTRA \
   $CPUFLAGS
 
 echo "*** rtranscribe: compiling bundled transcribe.cpp (${NJOBS} jobs, this takes a while)"
@@ -157,7 +293,6 @@ if [ -f "$MANIFEST" ]; then
   done
 fi
 
-OS="$(uname -s)"
 if [ -z "$SYSLIBS" ]; then
   # Manifest gave us nothing; use per-platform defaults.
   if [ "$OS" = "Darwin" ]; then
@@ -165,6 +300,23 @@ if [ -z "$SYSLIBS" ]; then
   else
     SYSLIBS="-lstdc++ -lm -lpthread -ldl"
   fi
+fi
+
+# CUDA: the link manifest reconstructs libtranscribe's OWN dependency list, and
+# ggml-cuda's (cudart / cublas / the driver library) are PRIVATE to that target,
+# so they never reach transcribe-link.json. In a static build they have to be on
+# our link line or the package .so ends up with undefined CUDA symbols. Vulkan
+# and Metal need nothing here — the manifest already emits -lvulkan and the
+# Metal frameworks.
+if [ -n "$CUDA_LIBDIR" ]; then
+  SYSLIBS="$SYSLIBS -L${CUDA_LIBDIR} -lcudart -lcublas"
+  # libcuda.so belongs to the driver, not the toolkit. The toolkit's stub is
+  # link-time only and the real one is found at run time; use it if the driver
+  # library is not visible to the linker.
+  if [ -d "${CUDA_LIBDIR}/stubs" ]; then
+    SYSLIBS="$SYSLIBS -L${CUDA_LIBDIR}/stubs"
+  fi
+  SYSLIBS="$SYSLIBS -lcuda"
 fi
 
 if [ "$OS" = "Darwin" ]; then

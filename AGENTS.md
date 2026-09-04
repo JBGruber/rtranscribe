@@ -25,13 +25,13 @@ Distribution is GitHub + r-universe. **Not CRAN** yet, which is why the
 | `R/` | The whole R API, ~1.9k lines, one file per concern |
 | `src/transcribe_glue.cpp` | The only hand-written C++ (~1.1k lines). All `[[Rcpp::export]]` entry points |
 | `src/RcppExports.cpp`, `R/RcppExports.R` | Generated — never edit by hand |
-| `src/transcribe-cpp/` | Vendored upstream tree (11 MB, CPU-only), plus `VENDOR` provenance |
+| `src/transcribe-cpp/` | Vendored upstream tree (16 MB: CPU plus the Vulkan/CUDA/Metal sources, only CPU is compiled by default), plus `VENDOR` provenance |
 | `src/Makevars.in`, `Makevars.win.in` | Templates; `configure` substitutes `@PKG_LIBS@` / `@VENDOR_INC@` |
 | `configure`, `cleanup` | Drive the CMake build and tear it down. `.win` variants are unproven |
 | `tools/vendor.sh` | Re-syncs the vendored tree from an upstream ref |
 | `tests/testthat/` | 7 test files plus `helper-rtranscribe.R`, which holds the model-gating skips |
 | `inst/extdata/` | `jfk.wav` (~11 s, offline tests) and `german.wav` (translation test) |
-| `plan.md` | The original build plan. Historical — the code is now the source of truth |
+| `plan.md` | Test plan for the unverified CUDA backend on an RTX 3060 machine (it previously held the original build plan, which the code has superseded) |
 
 ### R file map
 
@@ -106,9 +106,9 @@ unwinds. See the gotcha below for why the flag is not optional.
 1. Locates `cmake` (helpful per-distro error if missing).
 2. Reads `R CMD config CC`/`CXX` and **splits off the first word** (gotcha
    below).
-3. Runs the upstream CMake with a static, CPU-only, no-OpenMP, no-tests
-   configuration into `src/transcribe-cpp/build`, installing to
-   `src/transcribe-cpp/install`.
+3. Probes for any opted-in GPU backend's build dependencies (see below), then
+   runs the upstream CMake with a static, no-OpenMP, no-tests configuration
+   into `src/transcribe-cpp/build`, installing to `src/transcribe-cpp/install`.
 4. Parses `lib/transcribe-link.json` with `sed` (no JSON package available at
    configure time) to get the archive list and system libs, falling back to a
    glob if the manifest shape changes.
@@ -130,6 +130,41 @@ Environment knobs:
   not portable. Default is `TRANSCRIBE_X86_CONSERVATIVE=ON`.
 - `TRANSCRIBE_R_JOBS=N` — parallel compile jobs.
 - `CMAKE` — path to a specific cmake.
+- `TRANSCRIBE_R_VULKAN=1` / `TRANSCRIBE_R_CUDA=1` / `TRANSCRIBE_R_METAL=1` —
+  compile in that backend. Off by default.
+- `TRANSCRIBE_R_CUDA_ARCHS` — pass-through for `CMAKE_CUDA_ARCHITECTURES`.
+  Upstream's default is `native`, which is right for a source install and
+  wrong for anything you plan to move to another machine.
+
+### GPU backends
+
+Off by default for a distribution reason, not a capability one: the CPU build
+needs only a compiler, while each GPU backend needs an SDK at build time and
+drivers at run time, so none of them can be in a binary that has to install
+everywhere. Nothing above the build layer changes — the compiled-in set is what
+`transcribe_load_model(backend =)` can accept. Note that
+`transcribe_backend_available()` is a *device* probe, not a build probe: it
+walks the registered devices, so it answers `FALSE` on a Vulkan-enabled build
+running where no Vulkan driver exists.
+
+Two halves have to agree, and they are in different files:
+
+1. `tools/vendor.sh` — the allowlist decides which backend sources are in the
+   tree at all (`ggml-cpu`, `ggml-vulkan`, `ggml-cuda`, `ggml-metal`).
+2. `configure` — `require_backend_sources()` checks the directory is there,
+   then a dependency probe runs before CMake: `glslc` plus a
+   `#include <vulkan/vulkan.h>` compile test for Vulkan, `nvcc` (or `CUDACXX`)
+   for CUDA, `uname -s` for Metal. Each failure prints a per-distribution
+   install hint, because the CMake-level failure for a missing `glslc` is
+   unreadable.
+
+Verified: **CPU** and **Vulkan** (Linux). **CUDA** and **Metal** are wired but
+have never been built — no hardware here. Treat their link lines as unproven.
+
+`ggml-sycl` and `ggml-openvino` stay out of the tree deliberately: they hold
+the only Apache-2.0 code upstream, and excluding them is what keeps the
+compiled path uniformly MIT (`LICENSE.note`). Do not add them to the allowlist
+without redoing the licence bundle.
 
 ### Re-vendoring upstream
 
@@ -137,9 +172,11 @@ Environment knobs:
 tools/vendor.sh https://github.com/handy-computer/transcribe.cpp v0.2.0
 ```
 
-The script copies only what the CPU build compiles and prunes GPU backends with
-an **allowlist** (`ggml-cpu` survives, anything else named `ggml-*` is deleted),
-so a new upstream backend cannot silently slip into the tarball. It records
+The script copies every `ggml-*` backend directory and then prunes with an
+**allowlist** (`ggml-cpu`, `ggml-vulkan`, `ggml-cuda`, `ggml-metal` survive,
+anything else is deleted), so a new upstream backend cannot silently slip into
+the tarball. Sources being present is not the same as being compiled — see the
+GPU backends section above. It records
 url/ref/describe/sha/abihash in `src/transcribe-cpp/VENDOR`. Currently pinned at
 `v0.1.3-4-gb6a6aca`, abihash `d67a9bd78b964445`.
 
@@ -165,6 +202,19 @@ These each cost real time to discover:
   errors before warnings. Use `severity_rank()`.
 - **Option structs are size-aware**: a `struct_size` field of 0 is a bug. Call
   the corresponding `_init()` before filling one in.
+- **A reinstall reuses `src/rtranscribe.so`.** `make` sees it newer than the
+  glue sources and does nothing, so switching backends (or any change confined
+  to the vendored tree) silently keeps the previously linked shared object —
+  the install log says `make: Nothing to be done for 'all'` and everything else
+  looks like a success. `cleanup` now removes `src/*.o` and `src/*.so`; run it
+  (or `R CMD INSTALL --preclean`) when changing the backend set.
+- **`transcribe-link.json` does not carry ggml-cuda's dependencies.** The
+  manifest is reconstructed from `libtranscribe`'s *own* link list, and
+  cudart/cublas/the driver library are `PRIVATE` to the `ggml-cuda` target, so
+  a static CUDA build links with undefined CUDA symbols unless `configure`
+  appends them — which it does, in the block after `SYSLIBS` is assembled.
+  Vulkan and Metal need no such fixup: `cmake/transcribe-install.cmake` special
+  cases those two (`-lvulkan`, the Metal frameworks) and not CUDA.
 - **`av::read_audio_bin()` returns signed 32-bit samples** (`s32le`), so
   normalise by `2^31`, not `2^15`.
 - **GC protection**: an unprotected SEXP is collectable while a *later*
@@ -249,17 +299,15 @@ Current status: **1 NOTE** (installed size / compilation time), no warnings.
 
 ## State and limitations
 
-- **Nothing is committed yet.** The repo is `git init`'d on `main` with no
-  commits; everything is untracked. `test.mp4` and `snowflake.log` at the root
-  are scratch and should not be committed.
+- **One commit so far** (`initial commit` on `main`). `test.mp4` and
+  `snowflake.log` at the root are scratch and are gitignored.
 - **Windows is unsupported.** `DESCRIPTION` declares `OS_type: unix`.
   `configure.win` and `Makevars.win.in` exist as a starting point but have never
   been run. Dropping `OS_type` and adding the Windows CI matrix entry are one
   change, not two.
-- **CPU only.** The R API is already backend-agnostic
-  (`transcribe_backend_available()`, `transcribe_devices()`, the `backend`
-  argument), so Vulkan/CUDA/Metal is a build-configuration change plus a
-  `vendor.sh` allowlist entry — not an API change.
+- **CPU by default, GPU opt-in.** Vulkan is tested on Linux; CUDA and Metal are
+  wired up but unbuilt for want of hardware. Distributed r-universe binaries
+  stay CPU-only, so a GPU build always means a source install.
 - **Diarization is unverified end-to-end.** It is implemented and wired
   through, but the smallest diarization-capable model is over 1 GB, so no test
   exercises it.

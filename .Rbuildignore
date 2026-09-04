@@ -11,3 +11,4 @@
 ^src/Makevars$
 ^\.vscode$
 ^\.claude$
+^README\.Rmd$

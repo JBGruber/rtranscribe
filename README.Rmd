@@ -1,0 +1,224 @@
+---
+output: github_document
+---
+
+<!-- README.md is generated from README.Rmd. Please edit that file -->
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.path = "man/figures/README-",
+  out.width = "100%"
+)
+```
+
+# rtranscribe
+
+<!-- badges: start -->
+[![R-CMD-check](https://github.com/JBGruber/rtranscribe/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/JBGruber/rtranscribe/actions/workflows/R-CMD-check.yaml)
+<!-- badges: end -->
+
+R bindings to [transcribe.cpp](https://github.com/handy-computer/transcribe.cpp), a C++ speech-recognition library that runs 16 model families (Whisper, Parakeet, Moonshine, Voxtral, Canary and more) locally on the CPU.
+
+Everything runs on your machine: no API keys, no per-minute billing, and no audio leaves the computer.
+The C++ sources are bundled and compiled at install time, so there is no separate library to install.
+
+## Installation
+
+You need **cmake** and a C++17 compiler.
+The R sources build the bundled library, which takes a few minutes the first time.
+
+``` r
+# install.packages("remotes")
+remotes::install_github("JBGruber/rtranscribe")
+```
+
+## Quick start
+
+```{r}
+library(rtranscribe)
+
+# Fetch a small model (44 MB) into the package cache
+model <- transcribe_download_model("whisper-tiny")
+
+# Transcribe (uses a small audio file included in the package)
+jfk_file <- system.file("extdata", "jfk.wav", package = "rtranscribe")
+res <- transcribe(jfk_file, model)
+
+res$text
+res
+```
+
+Results come back as tibbles:
+
+```{r}
+res$segments
+res$words # word-level rows, when the model produces them
+res$tokens # token ids with confidences
+res$speakers # who spoke when, after diarization
+```
+
+Any audio format `ffmpeg` reads works (wav, mp3, m4a, flac, ogg, and the audio track of video files) via the [av](https://cran.r-project.org/package=av) package.
+You can also pass a numeric vector of 16 kHz mono PCM directly.
+
+## Choosing a model
+
+```{r}
+transcribe_models()
+```
+
+That is a curated shortlist.
+`refresh = TRUE` fetches the full catalogue (~70 models) from the Hugging Face API and appends everything else at the bottom:
+
+```{r}
+transcribe_models(refresh = TRUE)
+```
+
+The appended rows carry only a name: the listing API does not report size, WER or the transcribe.cpp architecture, and the repository tags are not a safe substitute (`moonshine-streaming-*` is tagged `moonshine`, but its family is `moonshine_streaming`).
+Read the authoritative architecture with `transcribe_model_info()` after downloading.
+Once refreshed, any listed name can be passed to `transcribe_download_model()`.
+
+This is a convenience, not a limit: any GGUF converted for transcribe.cpp works.
+Browse the catalogue at [huggingface.co/handy-computer](https://huggingface.co/handy-computer) and pass a path or URL directly.
+
+``` r
+m <- transcribe_load_model("~/models/parakeet-tdt-0.6b-v3-Q8_0.gguf")
+transcribe_capabilities(m)
+transcribe_supports(m, "diarization")
+```
+
+## Reusing a model
+
+Loading a model is the expensive part.
+Load once, then reuse the session:
+
+```{r}
+m <- transcribe_load_model(model)
+s <- transcribe_session(m, n_threads = 8)
+
+# assuming that the folder audio contains audio files
+for (f in list.files("audio", full.names = TRUE)) {
+  res <- transcribe_run(s, f)
+  cat(basename(f), ":", res$text, "\n")
+}
+```
+
+For many short clips, `transcribe_run_batch()` processes them in one dispatch:
+
+```{r}
+files <- list.files("inst/extdata", pattern = "\\.wav$", full.names = TRUE)
+results <- transcribe_run_batch(s, files)
+results
+```
+
+## Timestamps, translation and speakers
+
+Timestamps, translation and diarization are three independent capabilities and no single family has all three, so this section uses three sessions.
+Whisper tops out at segment timestamps; Parakeet resolves timings per token but has no translate head; speaker attribution needs a model trained for it.
+
+```{r}
+# Word-level timings: Parakeet times every token, so "word" is available
+pm <- transcribe_download_model("parakeet-tdt-0.6b-v3") |>
+  transcribe_load_model()
+ps <- transcribe_session(pm, n_threads = 8)
+res <- transcribe_run(ps, jfk_file, timestamps = "word")
+res$words
+
+# Translate into English. Note the model: the turbo distillation dropped the
+# translate task, so this needs a plain multilingual whisper.
+tm <- transcribe_download_model("whisper-base") |>
+  transcribe_load_model()
+german_file <- system.file("extdata", "german.wav", package = "rtranscribe")
+transcribe_run(
+  transcribe_session(tm),
+  german_file,
+  task = "translate",
+  target_language = "en"
+)
+```
+
+```r
+# Speaker attribution, on a model that advertises it
+dm <- transcribe_download_model("moss-transcribe-diarize") |>
+  transcribe_load_model()
+res <- transcribe_run(transcribe_session(dm), "meeting.wav", diarize = TRUE)
+res$speakers
+res$segments$speaker_id
+```
+
+Asking a model for something it cannot do is an error rather than a silent downgrade -- `unsupported timestamp granularity (status 12)` for timestamps, `unsupported task (status 11)` for translation -- so check the model first:
+
+```{r}
+transcribe_capabilities(pm)$max_timestamp_kind # "token"
+transcribe_capabilities(m)$max_timestamp_kind # "segment"
+transcribe_capabilities(m)$supports_translate # FALSE, on turbo
+transcribe_supports(pm, "diarization")
+```
+
+Both limits are properties of the model, not of its size.
+Every Whisper variant caps at `"segment"`, `whisper-large-v3-turbo` included; Parakeet, GigaAM and MedASR reach `"token"`, `granite-speech-*-plus` reaches `"word"`, and the remaining families report `"none"`.
+`timestamps = "auto"` (the default) never errors: it resolves to whatever the model can produce, and `res$timestamp_kind` reports what you actually got.
+
+## Model-specific options
+
+Some families expose knobs that do not generalise.
+They are passed with `family =` and validated against the loaded model:
+
+```{r}
+video_f <- curl::curl_download(
+  "https://www.gesis.org/fileadmin/Home/GESIS-Imagefilm_en.webm",
+  "GESIS-Imagefilm_en.webm"
+)
+# Bias Whisper's decoding toward domain vocabulary
+transcribe_run(
+  s,
+  video_f,
+  family = whisper_options(
+    initial_prompt = "GESIS – Leibniz Institute for the Social Sciences "
+  )
+)
+
+transcribe_accepts_options(m, whisper_options()) # TRUE for whisper models
+```
+
+Also available: `parakeet_stream_options()`, `parakeet_buffered_stream_options()`, `moonshine_streaming_options()` and `voxtral_realtime_options()`.
+
+## GPU backends
+
+The default build is CPU-only, because it has to work on any machine with a compiler.
+A GPU backend is compiled in on request, at install time:
+
+```sh
+TRANSCRIBE_R_VULKAN=1 R CMD INSTALL .   # AMD, Intel and NVIDIA
+TRANSCRIBE_R_CUDA=1   R CMD INSTALL .   # NVIDIA only
+TRANSCRIBE_R_METAL=1  R CMD INSTALL .   # Apple Silicon
+```
+
+The same variables work with `pak` and `remotes`, which build from source when installing from GitHub.
+Set them in `~/.Renviron` (`usethis::edit_r_environ(scope = "project")`) rather than with `Sys.setenv()`: pak builds in a background process that inherits the environment when it starts, so a variable set later in the session may not reach the build.
+
+```r
+# ~/.Renviron:  TRANSCRIBE_R_VULKAN=1
+pak::pak("JBGruber/rtranscribe")
+```
+
+Each backend needs its SDK at build time — Vulkan needs the loader headers and the `glslc` shader compiler, CUDA needs the toolkit — and `configure` checks for them up front, with a per-distribution install hint if something is missing.
+More than one can be enabled in the same build.
+
+Then use it:
+
+```r
+transcribe_devices()                     # every device the runtime can see
+transcribe_backend_available("vulkan")   # TRUE only if a Vulkan device is there
+m <- transcribe_load_model(path, backend = "vulkan")   # or "auto"
+```
+
+`transcribe_backend_available()` is a device probe, not a build probe: it needs both a build that compiled the backend in *and* a working driver, so it stays `FALSE` on a Vulkan build running on a machine with no Vulkan device.
+
+`backend = "auto"` takes the first GPU device that initialises (discrete before integrated) and falls back to the CPU if none does, so a GPU build still runs on a machine with no usable GPU.
+Naming a backend explicitly is an assertion: `backend = "vulkan"` errors rather than falling back.
+
+Two caveats.
+Prebuilt r-universe binaries are CPU-only, so a GPU build always means a source install.
+And of the three, only Vulkan has been tested here — CUDA and Metal are wired up but unverified on hardware.

@@ -23,8 +23,15 @@ or \code{"cuda"}.}
 }
 \details{
 The default source build of this package is CPU-only, so \code{transcribe_devices()}
-normally reports a single CPU device. GPU backends require a build configured
-for them.
+normally reports a single CPU device. A GPU backend has to be compiled in at
+install time — \code{TRANSCRIBE_R_VULKAN=1}, \code{TRANSCRIBE_R_CUDA=1} or
+\code{TRANSCRIBE_R_METAL=1} with a source install (see the README) — after which
+its devices appear here.
+
+\code{transcribe_backend_available()} is a device probe rather than a build probe:
+it is \code{TRUE} only when the backend was compiled in \emph{and} a usable device is
+present, so a Vulkan build on a machine with no Vulkan driver still answers
+\code{FALSE}.
 }
 \examples{
 transcribe_devices()

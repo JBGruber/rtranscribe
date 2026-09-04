@@ -46,21 +46,29 @@ without_av_noise <- function(expr) {
 
   on.exit(
     {
-      if (sink.number(type = "message") != 2L) sink(type = "message")
+      if (sink.number(type = "message") != 2L) {
+        sink(type = "message")
+      }
       if (prev != 2L) {
         prev_con <- tryCatch(getConnection(prev), error = function(e) NULL)
         if (!is.null(prev_con)) {
           try(sink(prev_con, type = "message"), silent = TRUE)
         }
       }
-      if (isOpen(con)) close(con)
-      msgs <- tryCatch(readLines(tmp, warn = FALSE), error = function(e) character())
+      if (isOpen(con)) {
+        close(con)
+      }
+      msgs <- tryCatch(readLines(tmp, warn = FALSE), error = function(e) {
+        character()
+      })
       unlink(tmp)
       # The message is printed without a trailing newline, so many copies run
       # together on one line; strip every occurrence and keep what is left.
       msgs <- trimws(gsub(av_downsample_noise, "", msgs, fixed = TRUE))
       msgs <- msgs[nzchar(msgs)]
-      for (m in msgs) message(m)
+      for (m in msgs) {
+        message(m)
+      }
     },
     add = TRUE
   )
@@ -96,19 +104,21 @@ transcribe_read_audio <- function(path, sample_rate = 16000) {
   if (!file.exists(path)) {
     cli::cli_abort("Audio file not found: {.path {path}}.")
   }
-  if (!requireNamespace("av", quietly = TRUE)) {
-    cli::cli_abort(c(
-      "Reading audio files requires the {.pkg av} package.",
-      "i" = 'Install it with {.run install.packages("av")}.',
-      "i" = "Alternatively, pass a numeric vector of 16 kHz mono PCM samples directly."
-    ))
-  }
-
-  pcm <- without_av_noise(av::read_audio_bin(path, channels = 1L, sample_rate = sample_rate))
+  rlang::check_installed(
+    "av",
+    reason = "for reading audio files. Alternatively, pass a numeric vector of 16 kHz mono PCM samples directly."
+  )
+  pcm <- without_av_noise(av::read_audio_bin(
+    path,
+    channels = 1L,
+    sample_rate = sample_rate
+  ))
   pcm <- as.numeric(pcm)
 
   if (length(pcm) == 0L) {
-    cli::cli_abort("No audio samples could be decoded from {.path {basename(path)}}.")
+    cli::cli_abort(
+      "No audio samples could be decoded from {.path {basename(path)}}."
+    )
   }
 
   # av::read_audio_bin documents its output as signed 32-bit integer samples

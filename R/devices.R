@@ -19,8 +19,15 @@ transcribe_version <- function() {
 #' `transcribe_backend_available()` probes whether a named backend can be used.
 #'
 #' The default source build of this package is CPU-only, so `transcribe_devices()`
-#' normally reports a single CPU device. GPU backends require a build configured
-#' for them.
+#' normally reports a single CPU device. A GPU backend has to be compiled in at
+#' install time — `TRANSCRIBE_R_VULKAN=1`, `TRANSCRIBE_R_CUDA=1` or
+#' `TRANSCRIBE_R_METAL=1` with a source install (see the README) — after which
+#' its devices appear here.
+#'
+#' `transcribe_backend_available()` is a device probe rather than a build probe:
+#' it is `TRUE` only when the backend was compiled in *and* a usable device is
+#' present, so a Vulkan build on a machine with no Vulkan driver still answers
+#' `FALSE`.
 #'
 #' @param kind One of `"auto"`, `"cpu"`, `"cpu_accel"`, `"metal"`, `"vulkan"`
 #'   or `"cuda"`.
