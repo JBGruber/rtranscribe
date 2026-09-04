@@ -54,14 +54,20 @@ jobs:
           args: 'c("--no-manual", "--as-cran")'
           error-on: '"error"'
 
-  # The GPU path is opt-in, so nothing above ever compiles it. This job builds
-  # it and proves the two things that can be checked without a GPU: that the
-  # Vulkan build links, and that it still works on a machine with no Vulkan
-  # device (mesa's lavapipe gives the runner a software one, so devices are
-  # actually enumerated rather than merely absent).
+  # The GPU path is opt-in, so nothing above ever compiles it. The three jobs
+  # below do. How much each can prove is set by what the runner has:
   #
-  # CUDA and Metal have no equivalent job: neither toolkit nor hardware is on
-  # a standard runner.
+  #   vulkan  build and run. mesa's lavapipe gives the runner a software
+  #           device, so devices are actually enumerated, not merely absent.
+  #   metal   build and run. macos-latest is Apple Silicon and every macOS
+  #           image ships Xcode, hence the Metal shader compiler. Whether the
+  #           virtualised runner also exposes a GPU is left to the smoke test
+  #           to report rather than assert.
+  #   cuda    build only. nvcc installs on a standard runner; an NVIDIA GPU
+  #           does not, so there is nothing to run the result on.
+  #
+  # In all three the point is the same: the CPU path must survive a GPU build
+  # on a machine where that GPU is missing.
   vulkan-build:
     runs-on: ubuntu-latest
     name: ubuntu-latest (release, vulkan)
@@ -104,5 +110,121 @@ jobs:
             cat("vulkan device:", transcribe_backend_available("vulkan"), "\n")
             # The CPU path must keep working whether or not a Vulkan device
             # showed up -- that is the whole point of a degradable build.
+            stopifnot(transcribe_backend_available("cpu"))
+          '
+
+  metal-build:
+    runs-on: macos-latest
+    name: macos-latest (release, metal)
+
+    env:
+      GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
+      TRANSCRIBE_R_METAL: 1
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: release
+          use-public-rspm: true
+
+      - name: Install cmake
+        uses: lukka/get-cmake@latest
+
+      # No SDK step: the Metal framework and the shader compiler
+      # (xcrun -sdk macosx metal) come with the Xcode that every macOS runner
+      # image already has. The vendored CMakeLists forces
+      # GGML_METAL_EMBED_LIBRARY=ON, so the compiled shaders land inside the
+      # archive instead of a loose .metallib the R package would have to
+      # install next to the shared object.
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          needs: check
+
+      - name: Install with the Metal backend
+        run: R CMD INSTALL --preclean .
+
+      - name: Smoke test
+        run: |
+          Rscript -e '
+            library(rtranscribe)
+            print(transcribe_devices())
+            cat("metal device:", transcribe_backend_available("metal"), "\n")
+            # As in the Vulkan job: whether the virtualised runner hands out a
+            # Metal device is informational, the CPU fallback is not.
+            stopifnot(transcribe_backend_available("cpu"))
+          '
+
+  cuda-build:
+    # nvcc is slow enough that this does not belong on the per-push path, so
+    # it is opt-in: run it from the Actions tab after touching configure or
+    # bumping the vendored sources.
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    name: ubuntu-latest (release, cuda)
+
+    env:
+      GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
+      TRANSCRIBE_R_CUDA: 1
+      # One architecture is enough to prove the sources compile. The default is
+      # every architecture ggml knows, which multiplies an already long nvcc
+      # run. 75 is Turing, the oldest CUDA 12 still builds without a warning.
+      TRANSCRIBE_R_CUDA_ARCHS: '75'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: release
+          use-public-rspm: true
+
+      - name: Install cmake
+        uses: lukka/get-cmake@latest
+
+      - name: Install the CUDA toolkit
+        uses: Jimver/cuda-toolkit@v0.2.36
+        with:
+          # Pinned rather than latest: a CUDA major bump is exactly the kind of
+          # thing that should break this job on a version change we chose, not
+          # on the day it ships.
+          cuda: '12.6.3'
+          # The full toolkit does not fit in the runner's free disk space, and
+          # the build needs only the compiler, the runtime and cuBLAS.
+          # cudart-dev also carries lib64/stubs/libcuda.so, which the link-line
+          # fixup in ./configure looks for.
+          method: 'network'
+          sub-packages: '["nvcc", "cudart-dev"]'
+          non-cuda-sub-packages: '["libcublas-dev"]'
+
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          needs: check
+
+      - name: Install with the CUDA backend
+        run: R CMD INSTALL --preclean .
+
+      - name: Report the libraries the package ended up needing
+        # configure appends -lcudart -lcublas -lcuda by hand, because
+        # ggml-cuda's dependencies are PRIVATE and never reach the link
+        # manifest. -lcuda resolves against the toolkit's stub, whose SONAME is
+        # libcuda.so.1 -- a library only the NVIDIA driver ships. If that
+        # becomes a DT_NEEDED entry, the package will not load at all on a
+        # machine without a driver, GPU code or not, and the smoke test below
+        # is what fails. That failure is the finding, not a flaky job.
+        run: |
+          SO="$(Rscript -e 'cat(system.file("libs", "rtranscribe.so", package = "rtranscribe"))')"
+          readelf -d "$SO" | grep NEEDED
+
+      - name: Smoke test
+        run: |
+          Rscript -e '
+            library(rtranscribe)
+            print(transcribe_devices())
+            # No NVIDIA device on the runner, so this is expected FALSE. The
+            # assertion is that a CUDA build still loads and still computes on
+            # a machine that has no CUDA anything.
+            cat("cuda device:", transcribe_backend_available("cuda"), "\n")
             stopifnot(transcribe_backend_available("cpu"))
           '
