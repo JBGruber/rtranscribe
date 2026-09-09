@@ -362,8 +362,13 @@ json_array() {
 ARCHIVES=""
 if [ -f "$MANIFEST" ]; then
   for l in $(json_array "$MANIFEST" libraries); do
+    # Usually "lib${l}.a", but ggml's CMakeLists strips the "lib" prefix for
+    # its own archives on some platforms (confirmed on Windows; see
+    # configure.win) while libtranscribe.a keeps it, so try both.
     if [ -f "$LIBDIR/lib${l}.a" ]; then
       ARCHIVES="$ARCHIVES $LIBDIR/lib${l}.a"
+    elif [ -f "$LIBDIR/${l}.a" ]; then
+      ARCHIVES="$ARCHIVES $LIBDIR/${l}.a"
     fi
   done
 fi

@@ -19,8 +19,9 @@ at install time, so there is no separate library to install.
 
 ## Installation
 
-You need **cmake** and a C++17 compiler. The R sources build the bundled
-library, which takes a few minutes the first time.
+You need **cmake** and a C++17 compiler (on Windows, Rtools provides
+both). The R sources build the bundled library, which takes a few
+minutes the first time.
 
 ``` r
 # install.packages("remotes")
@@ -34,7 +35,7 @@ library(rtranscribe)
 
 # Fetch a small model (44 MB) into the package cache
 model_file <- transcribe_download_model("whisper-tiny")
-#> ✔ Using cached model '/home/johannes/.cache/R/rtranscribe/whisper-tiny-Q8_0.gguf'.
+#> ✔ Using cached model 'C:\Users\johannes\AppData\Local/R/cache/R/rtranscribe/whisper-tiny-Q8_0.gguf'.
 
 # Transcribe (uses a small audio file included in the package)
 jfk_file <- system.file("extdata", "jfk.wav", package = "rtranscribe")
@@ -47,7 +48,7 @@ res
 #> <transcribe_result>
 #> • language: "en"
 #> • timestamps: "segment"
-#> • audio: 11s (113.3x real time)
+#> • audio: 11s (15.4x real time)
 #> • 1 segment, 0 words
 #> ────────────────────────────────────────────────────────────────────────────────
 #> [00:00:00.000 -> 00:00:10.500] And so my fellow Americans ask not what your country can do for you, ask what you can do for your country.
@@ -83,20 +84,15 @@ numeric vector of 16 kHz mono PCM directly.
 
 ``` r
 transcribe_models()
-#> # A tibble: 70 × 6
-#>    name                     family              size_mb   wer downloaded note   
-#>    <chr>                    <chr>                 <dbl> <dbl> <lgl>      <chr>  
-#>  1 whisper-tiny             whisper                  44  7.53 TRUE       Smalle…
-#>  2 whisper-tiny.en          whisper                  44  5.72 FALSE      Englis…
-#>  3 whisper-base             whisper                  81  5.12 TRUE       Multil…
-#>  4 whisper-large-v3-turbo   whisper                 845  2.01 TRUE       Best g…
-#>  5 parakeet-tdt-0.6b-v3     parakeet                740  1.94 TRUE       Fast t…
-#>  6 moonshine-streaming-tiny moonshine_streaming      48  4.52 TRUE       Small …
-#>  7 Breeze-ASR-25            <NA>                     NA NA    FALSE      <NA>   
-#>  8 canary-180m-flash        <NA>                     NA NA    FALSE      <NA>   
-#>  9 canary-1b                <NA>                     NA NA    FALSE      <NA>   
-#> 10 canary-1b-flash          <NA>                     NA NA    FALSE      <NA>   
-#> # ℹ 60 more rows
+#> # A tibble: 6 × 6
+#>   name                     family              size_mb   wer downloaded note    
+#>   <chr>                    <chr>                 <dbl> <dbl> <lgl>      <chr>   
+#> 1 whisper-tiny             whisper                  44  7.53 TRUE       Smalles…
+#> 2 whisper-tiny.en          whisper                  44  5.72 FALSE      English…
+#> 3 whisper-base             whisper                  81  5.12 FALSE      Multili…
+#> 4 whisper-large-v3-turbo   whisper                 845  2.01 FALSE      Best ge…
+#> 5 parakeet-tdt-0.6b-v3     parakeet                740  1.94 FALSE      Fast tr…
+#> 6 moonshine-streaming-tiny moonshine_streaming      48  4.52 FALSE      Small s…
 ```
 
 That is a curated shortlist. `refresh = TRUE` fetches the full catalogue
@@ -110,10 +106,10 @@ transcribe_models(refresh = TRUE)
 #>    <chr>                    <chr>                 <dbl> <dbl> <lgl>      <chr>  
 #>  1 whisper-tiny             whisper                  44  7.53 TRUE       Smalle…
 #>  2 whisper-tiny.en          whisper                  44  5.72 FALSE      Englis…
-#>  3 whisper-base             whisper                  81  5.12 TRUE       Multil…
-#>  4 whisper-large-v3-turbo   whisper                 845  2.01 TRUE       Best g…
-#>  5 parakeet-tdt-0.6b-v3     parakeet                740  1.94 TRUE       Fast t…
-#>  6 moonshine-streaming-tiny moonshine_streaming      48  4.52 TRUE       Small …
+#>  3 whisper-base             whisper                  81  5.12 FALSE      Multil…
+#>  4 whisper-large-v3-turbo   whisper                 845  2.01 FALSE      Best g…
+#>  5 parakeet-tdt-0.6b-v3     parakeet                740  1.94 FALSE      Fast t…
+#>  6 moonshine-streaming-tiny moonshine_streaming      48  4.52 FALSE      Small …
 #>  7 Breeze-ASR-25            <NA>                     NA NA    FALSE      <NA>   
 #>  8 canary-180m-flash        <NA>                     NA NA    FALSE      <NA>   
 #>  9 canary-1b                <NA>                     NA NA    FALSE      <NA>   
@@ -151,7 +147,7 @@ session:
 
 ``` r
 m <- transcribe_load_model("whisper-tiny")
-#> ✔ Using cached model '/home/johannes/.cache/R/rtranscribe/whisper-tiny-Q8_0.gguf'.
+#> ✔ Using cached model 'C:\Users\johannes\AppData\Local/R/cache/R/rtranscribe/whisper-tiny-Q8_0.gguf'.
 s <- transcribe_session(m, n_threads = 8)
 
 # assuming that the folder audio contains audio files
@@ -172,7 +168,7 @@ results
 #> <transcribe_result>
 #> • language: "de"
 #> • timestamps: "segment"
-#> • audio: 29.3s (259.6x real time)
+#> • audio: 29.3s (34.7x real time)
 #> • 1 segment, 0 words
 #> ────────────────────────────────────────────────────────────────────────────────
 #> [00:00:00.000 -> 00:00:29.000] Am Strand der Bade anzug die Badehose, die Sandalen, die Luftmatratze, das Handtuch, das Eis, der Ball, die Sonne, das Meer, die Wellen,
@@ -181,7 +177,7 @@ results
 #> <transcribe_result>
 #> • language: "en"
 #> • timestamps: "segment"
-#> • audio: 11s (97.4x real time)
+#> • audio: 11s (15.1x real time)
 #> • 1 segment, 0 words
 #> ────────────────────────────────────────────────────────────────────────────────
 #> [00:00:00.000 -> 00:00:10.500] And so my fellow Americans ask not what your country can do for you, ask what you can do for your country.
@@ -198,7 +194,10 @@ attribution needs a model trained for it.
 ``` r
 # Word-level timings: Parakeet times every token, so "word" is available
 pm <- transcribe_load_model("parakeet-tdt-0.6b-v3")
-#> ✔ Using cached model '/home/johannes/.cache/R/rtranscribe/parakeet-tdt-0.6b-v3-Q8_0.gguf'.
+#> ℹ Do you want to download "parakeet-tdt-0.6b-v3"?
+#>  (Yes/no/cancel)
+#> ℹ Downloading "parakeet-tdt-0.6b-v3" (~740 MB) to 'C:\Users\johannes\AppData\Local/R/cache/R/rtranscribe'
+#> ✔ Saved 'C:\Users\johannes\AppData\Local/R/cache/R/rtranscribe/parakeet-tdt-0.6b-v3-Q8_0.gguf'.
 ps <- transcribe_session(pm, n_threads = 8)
 res <- transcribe_run(ps, jfk_file, timestamps = "word")
 res$words
@@ -213,14 +212,17 @@ res$words
 #>  6  3.28  3.92 ask              1           0        0
 #>  7  4.24  4.56 not              1           0        0
 #>  8  5.2   5.52 what             1           0        0
-#>  9  5.52  5.68 your             1           0        0
+#>  9  5.68  6    your             1           0        0
 #> 10  6     6.56 country          1           0        0
 #> # ℹ 12 more rows
 
 # Translate into English. Note the model: the turbo distillation dropped the
 # translate task, so this needs a plain multilingual whisper.
 tm <- transcribe_load_model("whisper-base")
-#> ✔ Using cached model '/home/johannes/.cache/R/rtranscribe/whisper-base-Q8_0.gguf'.
+#> ℹ Do you want to download "whisper-base"?
+#>  (Yes/no/cancel)
+#> ℹ Downloading "whisper-base" (~81 MB) to 'C:\Users\johannes\AppData\Local/R/cache/R/rtranscribe'
+#> ✔ Saved 'C:\Users\johannes\AppData\Local/R/cache/R/rtranscribe/whisper-base-Q8_0.gguf'.
 german_file <- system.file("extdata", "german.wav", package = "rtranscribe")
 transcribe_run(
   transcribe_session(tm),
@@ -231,10 +233,11 @@ transcribe_run(
 #> <transcribe_result>
 #> • language: "de"
 #> • timestamps: "segment"
-#> • audio: 29.3s (320.2x real time)
-#> • 1 segment, 0 words
+#> • audio: 29.3s (10.8x real time)
+#> • 2 segments, 0 words
 #> ────────────────────────────────────────────────────────────────────────────────
-#> [00:00:00.000 -> 00:00:28.000] On the beach the boat train, the boat train, the sandals, the air mattress, the shower, the ice, the ball, the sun, the sea, the waves,
+#> [00:00:00.000 -> 00:00:24.760] On the beach the boat train, the boat train, the sandals, the air mattress, the shower, the ice, the ball, the sun,
+#> [00:00:24.760 -> 00:00:27.720] The way around...
 ```
 
 ``` r
@@ -294,15 +297,15 @@ transcribe_run(
 #> <transcribe_result>
 #> • language: "en"
 #> • timestamps: "segment"
-#> • audio: 134.9s (327.2x real time)
-#> • 22 segments, 0 words
+#> • audio: 134.9s (30.4x real time)
+#> • 20 segments, 0 words
 #> ────────────────────────────────────────────────────────────────────────────────
 #> [00:00:00.000 -> 00:00:07.000] GESIS is one of the world's leading infrastructural institutions for social science research.
 #> [00:00:07.000 -> 00:00:15.000] With over 350 employees and manheim and colon, we contribute to a better understanding of our society.
-#> [00:00:15.000 -> 00:00:22.000] What attitudes and opinions do people in Germany have? What values are important to them?
-#> [00:00:22.000 -> 00:00:29.000] How has their thinking changed over time? And how does it differ from our European neighbors and worldwide?
-#> [00:00:30.000 -> 00:00:37.000] We conduct research on these questions and provide other researchers with the building blocks to carry out their own projects.
-#> ... 17 more segments
+#> [00:00:15.000 -> 00:00:20.000] What attitudes and opinions do people in Germany have?
+#> [00:00:20.000 -> 00:00:24.000] What values are important to them? How has their thinking changed over time?
+#> [00:00:24.000 -> 00:00:29.000] And how does it differ from our European neighbors and worldwide?
+#> ... 15 more segments
 
 transcribe_accepts_options(m, whisper_options()) # TRUE for whisper models
 #> [1] TRUE

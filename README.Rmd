@@ -26,7 +26,7 @@ The C++ sources are bundled and compiled at install time, so there is no separat
 
 ## Installation
 
-You need **cmake** and a C++17 compiler.
+You need **cmake** and a C++17 compiler (on Windows, Rtools provides both).
 The R sources build the bundled library, which takes a few minutes the first time.
 
 ``` r

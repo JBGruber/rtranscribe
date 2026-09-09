@@ -6,6 +6,7 @@ src/*.o
 src/*.so
 src/*.dll
 src/Makevars
+src/Makevars.win
 src/transcribe-cpp/build/
 src/transcribe-cpp/install/
 *.Rcheck/

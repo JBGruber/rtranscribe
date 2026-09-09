@@ -76,10 +76,11 @@ bundled sources with no external library to install.
 
 ## Known limitations
 
-* Windows is not supported yet (`OS_type: unix`). `configure.win` is in the
-  tree as a starting point but is unproven.
-* Only the CPU and Vulkan builds have been tested. The CUDA and Metal switches
-  are wired up but have not been run on hardware; reports welcome.
+* Windows is supported for the CPU build (verified with Rtools45 / R 4.5.2).
+  GPU backends on Windows are untested.
+* Only the CPU (Linux, macOS, Windows) and Vulkan (Linux) builds have been
+  tested. The CUDA and Metal switches are wired up but have not been run on
+  hardware; reports welcome.
 * GPU backends require a source install. Prebuilt r-universe binaries are
   CPU-only, since a binary has to install on machines with no GPU SDK.
 * Speaker diarization is implemented but has not been verified end-to-end,

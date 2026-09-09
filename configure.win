@@ -88,10 +88,19 @@ if [ "${TRANSCRIBE_R_CUDA:-0}" = "1" ]; then
   GPU_LIBS="$GPU_LIBS -lcudart -lcublas -lcuda"
 fi
 
+# mingw-w64's <processthreadsapi.h> declares PROCESS_POWER_THROTTLING_STATE
+# but not the (real Windows SDK) THREAD_POWER_THROTTLING_STATE counterpart
+# ggml-cpu.c uses for per-thread power throttling. The two have identical
+# layout and constants in the real SDK, so alias them at the preprocessor
+# level rather than patching the vendored source.
+MINGW_FIX="-DTHREAD_POWER_THROTTLING_STATE=PROCESS_POWER_THROTTLING_STATE -DTHREAD_POWER_THROTTLING_CURRENT_VERSION=PROCESS_POWER_THROTTLING_CURRENT_VERSION -DTHREAD_POWER_THROTTLING_EXECUTION_SPEED=PROCESS_POWER_THROTTLING_EXECUTION_SPEED"
+
 "$CMAKE" -S "$VENDOR" -B "$BUILD" -G "MSYS Makefiles" \
   -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_C_COMPILER="$CC_BIN" \
   -DCMAKE_CXX_COMPILER="$CXX_BIN" \
+  -DCMAKE_C_FLAGS="$MINGW_FIX" \
+  -DCMAKE_CXX_FLAGS="$MINGW_FIX" \
   -DCMAKE_INSTALL_PREFIX="$PREFIX" \
   -DTRANSCRIBE_BUILD_SHARED=OFF \
   -DTRANSCRIBE_INSTALL=ON \
@@ -121,7 +130,14 @@ json_array() {
 ARCHIVES=""
 if [ -f "$MANIFEST" ]; then
   for l in $(json_array "$MANIFEST" libraries); do
-    [ -f "$LIBDIR/lib${l}.a" ] && ARCHIVES="$ARCHIVES $LIBDIR/lib${l}.a"
+    # ggml's own CMakeLists strips the "lib" prefix for its Windows archives
+    # (libtranscribe.a keeps it, ggml.a/ggml-cpu.a/ggml-base.a do not), so
+    # the manifest's bare name may resolve to either file on disk.
+    if [ -f "$LIBDIR/lib${l}.a" ]; then
+      ARCHIVES="$ARCHIVES $LIBDIR/lib${l}.a"
+    elif [ -f "$LIBDIR/${l}.a" ]; then
+      ARCHIVES="$ARCHIVES $LIBDIR/${l}.a"
+    fi
   done
 fi
 [ -z "$ARCHIVES" ] && ARCHIVES="$(ls "$LIBDIR"/*.a 2>/dev/null | tr '\n' ' ')"

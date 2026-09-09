@@ -51,4 +51,3 @@ Config/testthat/edition: 3
 Roxygen: list(markdown = TRUE)
 Biarch: false
 Config/roxygen2/version: 8.1.0
-OS_type: unix

@@ -160,8 +160,10 @@ Two halves have to agree, and they are in different files:
    for Metal. Each failure prints a per-distribution install hint, because
    the CMake-level failure for a missing dependency is unreadable.
 
-Verified: **CPU** and **Vulkan** (Linux). **CUDA** and **Metal** are wired but
-have never been built — no hardware here. Treat their link lines as unproven.
+Verified: **CPU** (Linux, macOS, Windows) and **Vulkan** (Linux). **CUDA** and
+**Metal** are wired but have never been built — no hardware here. Treat their
+link lines as unproven, and treat any GPU backend on Windows as unproven too —
+only the CPU path in `configure.win` has been run.
 
 `ggml-sycl` and `ggml-openvino` stay out of the tree deliberately: they hold
 the only Apache-2.0 code upstream, and excluding them is what keeps the
@@ -288,9 +290,9 @@ Two models are needed because whisper-tiny can neither stream nor diarize.
 Models come from
 `https://huggingface.co/handy-computer/<name>-gguf/resolve/main/<name>-Q8_0.gguf`.
 
-CI: `R-CMD-check.yaml` on every push (ubuntu release/devel/oldrel + macOS;
-no Windows entry, deliberately). `test-with-model.yaml` runs the gated suite
-weekly with a model cache.
+CI: `R-CMD-check.yaml` on every push (ubuntu release/devel/oldrel + macOS +
+windows-latest). `test-with-model.yaml` runs the gated suite weekly with a
+model cache.
 
 **`R CMD check` hanging at "checking package dependencies"** is almost always
 a Bioconductor entry in `options(repos)` reaching out over the network. Work
@@ -303,10 +305,17 @@ Current status: **1 NOTE** (installed size / compilation time), no warnings.
 
 - **One commit so far** (`initial commit` on `main`). `test.mp4` and
   `snowflake.log` at the root are scratch and are gitignored.
-- **Windows is unsupported.** `DESCRIPTION` declares `OS_type: unix`.
-  `configure.win` and `Makevars.win.in` exist as a starting point but have never
-  been run. Dropping `OS_type` and adding the Windows CI matrix entry are one
-  change, not two.
+- **Windows is supported (CPU only, verified by hand on Rtools45/R 4.5.2).**
+  `configure.win` builds the vendored tree with the MSYS Makefiles generator
+  and Rtools' own gcc/g++. Two things `configure` didn't need: mingw-w64's
+  headers lack `THREAD_POWER_THROTTLING_STATE` (only the process-scoped
+  variant), aliased via `-D` flags onto the identical `PROCESS_*` type rather
+  than patching vendored `ggml-cpu.c`; and ggml's own CMakeLists drops the
+  `lib` prefix from `ggml.a`/`ggml-cpu.a`/`ggml-base.a` on Windows while
+  `libtranscribe.a` keeps it, so the archive-resolution loop in both
+  `configure` and `configure.win` tries `lib${l}.a` then bare `${l}.a`.
+  GPU backends on Windows are unproven (Vulkan/CUDA build dependency probes
+  in `configure.win` are copied from `configure` but never exercised).
 - **CPU by default, GPU opt-in.** Vulkan is tested on Linux; CUDA and Metal are
   wired up but unbuilt for want of hardware. Distributed r-universe binaries
   stay CPU-only, so a GPU build always means a source install.
