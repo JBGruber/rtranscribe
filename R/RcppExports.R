@@ -81,12 +81,12 @@ cpp_session_model <- function(session) {
     .Call(`_rtranscribe_cpp_session_model`, session)
 }
 
-cpp_run <- function(session, pcm, opts, interruptible) {
-    .Call(`_rtranscribe_cpp_run`, session, pcm, opts, interruptible)
+cpp_run <- function(session, pcm, opts, interruptible, tick, tick_interval) {
+    .Call(`_rtranscribe_cpp_run`, session, pcm, opts, interruptible, tick, tick_interval)
 }
 
-cpp_run_batch <- function(session, pcms, opts, interruptible) {
-    .Call(`_rtranscribe_cpp_run_batch`, session, pcms, opts, interruptible)
+cpp_run_batch <- function(session, pcms, opts, interruptible, tick, tick_interval) {
+    .Call(`_rtranscribe_cpp_run_batch`, session, pcms, opts, interruptible, tick, tick_interval)
 }
 
 cpp_stream_begin <- function(session, run_opts, stream_opts) {

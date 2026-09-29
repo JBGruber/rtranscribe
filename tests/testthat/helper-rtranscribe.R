@@ -86,7 +86,10 @@ local_model_cache <- function(env = parent.frame()) {
 fake_catalogue <- function() {
   tibble::tibble(
     name = c("whisper-tiny", "brand-new-model"),
-    repo = c("handy-computer/whisper-tiny-gguf", "handy-computer/brand-new-model-gguf"),
+    repo = c(
+      "handy-computer/whisper-tiny-gguf",
+      "handy-computer/brand-new-model-gguf"
+    ),
     file = c("whisper-tiny-Q8_0.gguf", "brand-new-model-Q8_0.gguf"),
     family = NA_character_,
     size_mb = NA_real_,

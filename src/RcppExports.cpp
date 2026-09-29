@@ -242,8 +242,8 @@ BEGIN_RCPP
 END_RCPP
 }
 // cpp_run
-List cpp_run(SEXP session, NumericVector pcm, List opts, bool interruptible);
-RcppExport SEXP _rtranscribe_cpp_run(SEXP sessionSEXP, SEXP pcmSEXP, SEXP optsSEXP, SEXP interruptibleSEXP) {
+List cpp_run(SEXP session, NumericVector pcm, List opts, bool interruptible, SEXP tick, double tick_interval);
+RcppExport SEXP _rtranscribe_cpp_run(SEXP sessionSEXP, SEXP pcmSEXP, SEXP optsSEXP, SEXP interruptibleSEXP, SEXP tickSEXP, SEXP tick_intervalSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -251,13 +251,15 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< NumericVector >::type pcm(pcmSEXP);
     Rcpp::traits::input_parameter< List >::type opts(optsSEXP);
     Rcpp::traits::input_parameter< bool >::type interruptible(interruptibleSEXP);
-    rcpp_result_gen = Rcpp::wrap(cpp_run(session, pcm, opts, interruptible));
+    Rcpp::traits::input_parameter< SEXP >::type tick(tickSEXP);
+    Rcpp::traits::input_parameter< double >::type tick_interval(tick_intervalSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_run(session, pcm, opts, interruptible, tick, tick_interval));
     return rcpp_result_gen;
 END_RCPP
 }
 // cpp_run_batch
-List cpp_run_batch(SEXP session, List pcms, List opts, bool interruptible);
-RcppExport SEXP _rtranscribe_cpp_run_batch(SEXP sessionSEXP, SEXP pcmsSEXP, SEXP optsSEXP, SEXP interruptibleSEXP) {
+List cpp_run_batch(SEXP session, List pcms, List opts, bool interruptible, SEXP tick, double tick_interval);
+RcppExport SEXP _rtranscribe_cpp_run_batch(SEXP sessionSEXP, SEXP pcmsSEXP, SEXP optsSEXP, SEXP interruptibleSEXP, SEXP tickSEXP, SEXP tick_intervalSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -265,7 +267,9 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< List >::type pcms(pcmsSEXP);
     Rcpp::traits::input_parameter< List >::type opts(optsSEXP);
     Rcpp::traits::input_parameter< bool >::type interruptible(interruptibleSEXP);
-    rcpp_result_gen = Rcpp::wrap(cpp_run_batch(session, pcms, opts, interruptible));
+    Rcpp::traits::input_parameter< SEXP >::type tick(tickSEXP);
+    Rcpp::traits::input_parameter< double >::type tick_interval(tick_intervalSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_run_batch(session, pcms, opts, interruptible, tick, tick_interval));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -382,8 +386,8 @@ static const R_CallMethodDef CallEntries[] = {
     {"_rtranscribe_cpp_open", (DL_FUNC) &_rtranscribe_cpp_open, 6},
     {"_rtranscribe_cpp_session_limits", (DL_FUNC) &_rtranscribe_cpp_session_limits, 1},
     {"_rtranscribe_cpp_session_model", (DL_FUNC) &_rtranscribe_cpp_session_model, 1},
-    {"_rtranscribe_cpp_run", (DL_FUNC) &_rtranscribe_cpp_run, 4},
-    {"_rtranscribe_cpp_run_batch", (DL_FUNC) &_rtranscribe_cpp_run_batch, 4},
+    {"_rtranscribe_cpp_run", (DL_FUNC) &_rtranscribe_cpp_run, 6},
+    {"_rtranscribe_cpp_run_batch", (DL_FUNC) &_rtranscribe_cpp_run_batch, 6},
     {"_rtranscribe_cpp_stream_begin", (DL_FUNC) &_rtranscribe_cpp_stream_begin, 3},
     {"_rtranscribe_cpp_stream_feed", (DL_FUNC) &_rtranscribe_cpp_stream_feed, 3},
     {"_rtranscribe_cpp_stream_finalize", (DL_FUNC) &_rtranscribe_cpp_stream_finalize, 2},

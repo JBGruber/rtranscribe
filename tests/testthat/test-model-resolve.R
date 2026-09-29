@@ -4,8 +4,13 @@
 
 # Stands in for transcribe_download_model(), recording what it was handed and
 # aborting before any network access.
-mock_download <- function(name, dest = NULL, overwrite = FALSE, quiet = FALSE,
-                          ask = FALSE) {
+mock_download <- function(
+  name,
+  dest = NULL,
+  overwrite = FALSE,
+  quiet = FALSE,
+  ask = FALSE
+) {
   rlang::abort(
     "stubbed download",
     class = "rtranscribe_download_called",
@@ -45,7 +50,10 @@ test_that("a bare model name is handed to transcribe_download_model()", {
 test_that("path-shaped arguments are missing files, not model names", {
   local_stub_download()
 
-  expect_error(rtranscribe:::resolve_model_path("models/nope.gguf"), "not found")
+  expect_error(
+    rtranscribe:::resolve_model_path("models/nope.gguf"),
+    "not found"
+  )
   expect_error(rtranscribe:::resolve_model_path("~/nope.gguf"), "not found")
   expect_error(rtranscribe:::resolve_model_path("nope.gguf"), "not found")
 })
@@ -63,7 +71,10 @@ test_that("an unknown bare name reports the registry, not a missing file", {
 
 test_that("the argument name is used in the type-check message", {
   expect_error(rtranscribe:::resolve_model_path(1L), "`path`")
-  expect_error(rtranscribe:::resolve_model_path(c("a", "b")), "single file path")
+  expect_error(
+    rtranscribe:::resolve_model_path(c("a", "b")),
+    "single file path"
+  )
   expect_error(
     rtranscribe:::resolve_model_path(NA_character_, arg = "model"),
     "`model`"
@@ -118,7 +129,12 @@ test_that("a cached model is not re-downloaded", {
   writeBin(as.raw(0), cached)
 
   expect_equal(
-    transcribe_download_model("whisper-tiny", dest = dest, quiet = TRUE, ask = TRUE),
+    transcribe_download_model(
+      "whisper-tiny",
+      dest = dest,
+      quiet = TRUE,
+      ask = TRUE
+    ),
     cached
   )
 })

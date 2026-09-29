@@ -13,6 +13,7 @@
 
 #include <Rcpp.h>
 
+#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <mutex>
@@ -325,47 +326,108 @@ List cpp_log_drain() {
 }
 
 // ---------------------------------------------------------------------------
-// Cancellation (Ctrl-C)
+// Cancellation (Ctrl-C) and the progress heartbeat
 //
 // R_CheckUserInterrupt long-jumps when an interrupt is pending, which must
 // never happen from inside C++ with live destructors. R_ToplevelExec runs the
 // check in a context where the jump is caught, so the abort callback can
 // report "interrupt pending" as a plain bool.
+//
+// The same callback doubles as the only progress hook available. The C API
+// has no progress callback -- transcribe_run_params carries no such field,
+// and nothing exposes the run's position through the audio, because every
+// result accessor is gated on has_result, which the families only flip at
+// commit time. What the abort callback does give is a heartbeat: upstream
+// documents it as polled between chunks AND after every decode step, "on the
+// run thread", which for a synchronous transcribe_run() is the R thread. So
+// it can safely drive an R-level display -- a spinner with elapsed time, not
+// a bar with a percentage, since no position is available to report.
 // ---------------------------------------------------------------------------
 
 static void check_interrupt_fn(void * /*dummy*/) { R_CheckUserInterrupt(); }
 
 static bool interrupt_pending() { return R_ToplevelExec(check_interrupt_fn, NULL) == FALSE; }
 
-// R_ToplevelExec CONSUMES the pending interrupt when it catches the long jump,
-// so by the time the run returns there is nothing left for a later
-// checkUserInterrupt() to see. Record the fact here and re-raise it explicitly
-// once the native call has unwound and it is safe to throw.
-static bool g_interrupted = false;
+// R_ToplevelExec CONSUMES the interrupt it catches, so by the time the run
+// returns there is nothing left for a later checkUserInterrupt() to see.
+// Record the fact here and re-raise it explicitly once the native call has
+// unwound and it is safe to throw.
+static bool g_interrupted     = false;
+static bool g_check_interrupt = false;
+
+// The R closure called on each heartbeat, NULL when no run wants ticks. It is
+// always a `.Call` argument of the run currently on the stack, so the calling
+// frame protects it and no extra R_PreserveObject is needed.
+static SEXP   g_tick_fn       = NULL;
+static double g_tick_interval = 0.1;
+
+static std::chrono::steady_clock::time_point g_tick_last;
+
+static void call_tick_fn(void * /*dummy*/) {
+    SEXP call = PROTECT(Rf_lang1(g_tick_fn));
+    Rf_eval(call, R_GlobalEnv);
+    UNPROTECT(1);
+}
+
+// Returns false when ticking must stop for the rest of this run.
+//
+// The poll fires every decode step -- 10-50 ms on CPU -- which is far more
+// often than any display needs redrawing, so the interval throttles it.
+static bool run_tick() {
+    const auto now = std::chrono::steady_clock::now();
+    if (std::chrono::duration<double>(now - g_tick_last).count() < g_tick_interval) {
+        return true;
+    }
+    g_tick_last = now;
+    // A long jump out of the tick would tear through the library's live C++
+    // frames, so the evaluation is contained the same way the interrupt check
+    // is. A failure is nearly always an interrupt that the tick's own R code
+    // consumed: ticking stops, and the next poll -- one decode step away --
+    // sees the user's next Ctrl-C through the ordinary path above. Treating it
+    // as an abort instead would turn a formatting slip into a spurious
+    // "interrupted by user".
+    return R_ToplevelExec(call_tick_fn, NULL) != FALSE;
+}
 
 static bool abort_callback(void * /*user_data*/) {
-    if (interrupt_pending()) {
+    if (g_check_interrupt && interrupt_pending()) {
         g_interrupted = true;
         return true;
+    }
+    if (g_tick_fn != NULL && !run_tick()) {
+        g_tick_fn = NULL;
     }
     return false;
 }
 
 // Install the abort hook for the duration of one native call, and make sure it
-// is removed again even if marshalling below throws.
+// is removed again even if marshalling below throws. The hook is needed when
+// either half wants it: Ctrl-C handling, a progress tick, or both.
 namespace {
-struct AbortGuard {
+struct RunHooks {
     transcribe_session * s;
     bool                 active;
 
-    AbortGuard(transcribe_session * session, bool enable) : s(session), active(enable) {
-        if (active) {
-            g_interrupted = false;
-            transcribe_set_abort_callback(s, abort_callback, NULL);
-        }
+    RunHooks(transcribe_session * session, bool interruptible, SEXP tick = R_NilValue,
+             double interval = 0.1)
+        : s(session), active(false) {
+        const bool want_tick = (tick != R_NilValue && TYPEOF(tick) == CLOSXP);
+        active               = interruptible || want_tick;
+
+        g_interrupted     = false;
+        g_check_interrupt = interruptible;
+        g_tick_fn         = want_tick ? tick : NULL;
+        g_tick_interval   = interval;
+        // Start the clock now rather than at zero, so a run that finishes
+        // inside one interval never ticks at all.
+        g_tick_last = std::chrono::steady_clock::now();
+
+        if (active) transcribe_set_abort_callback(s, abort_callback, NULL);
     }
-    ~AbortGuard() {
+    ~RunHooks() {
         if (active) transcribe_set_abort_callback(s, NULL, NULL);
+        g_tick_fn         = NULL;
+        g_check_interrupt = false;
     }
 };
 }  // namespace
@@ -914,7 +976,8 @@ static bool is_partial_status(transcribe_status st) {
 }
 
 // [[Rcpp::export]]
-List cpp_run(SEXP session, NumericVector pcm, List opts, bool interruptible) {
+List cpp_run(SEXP session, NumericVector pcm, List opts, bool interruptible, SEXP tick,
+             double tick_interval) {
     transcribe_session * s = get_session(session);
 
     std::vector<float> buf(pcm.size());
@@ -925,7 +988,7 @@ List cpp_run(SEXP session, NumericVector pcm, List opts, bool interruptible) {
 
     transcribe_status st;
     {
-        AbortGuard guard(s, interruptible);
+        RunHooks guard(s, interruptible, tick, tick_interval);
         st = transcribe_run(s, buf.data(), (int) buf.size(), &h.p);
     }
     rethrow_if_interrupted(st);
@@ -941,7 +1004,8 @@ List cpp_run(SEXP session, NumericVector pcm, List opts, bool interruptible) {
 }
 
 // [[Rcpp::export]]
-List cpp_run_batch(SEXP session, List pcms, List opts, bool interruptible) {
+List cpp_run_batch(SEXP session, List pcms, List opts, bool interruptible, SEXP tick,
+                   double tick_interval) {
     transcribe_session * s = get_session(session);
 
     int n = pcms.size();
@@ -963,7 +1027,7 @@ List cpp_run_batch(SEXP session, List pcms, List opts, bool interruptible) {
 
     transcribe_status st;
     {
-        AbortGuard guard(s, interruptible);
+        RunHooks guard(s, interruptible, tick, tick_interval);
         st = transcribe_run_batch(s, ptrs.data(), lens.data(), n, &h.p);
     }
     rethrow_if_interrupted(st);
@@ -1029,7 +1093,7 @@ List cpp_stream_feed(SEXP session, NumericVector pcm, bool interruptible) {
 
     transcribe_status st;
     {
-        AbortGuard guard(s, interruptible);
+        RunHooks guard(s, interruptible);
         st = transcribe_stream_feed(s, buf.data(), (int) buf.size(), &u);
     }
     rethrow_if_interrupted(st);
@@ -1046,7 +1110,7 @@ List cpp_stream_finalize(SEXP session, bool interruptible) {
 
     transcribe_status st;
     {
-        AbortGuard guard(s, interruptible);
+        RunHooks guard(s, interruptible);
         st = transcribe_stream_finalize(s, &u);
     }
     rethrow_if_interrupted(st);

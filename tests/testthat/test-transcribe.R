@@ -8,14 +8,19 @@ test_that("a model loads and reports its identity", {
   expect_s3_class(m, "transcribe_model")
   expect_true(nzchar(m$arch))
   expect_true(nzchar(m$backend))
-  expect_match(paste(cli::cli_fmt(print(m)), collapse = " "), "transcribe_model")
+  expect_match(
+    paste(cli::cli_fmt(print(m)), collapse = " "),
+    "transcribe_model"
+  )
 
   info <- transcribe_model_info(m)
   expect_true(nzchar(info$arch))
 
   caps <- transcribe_capabilities(m)
   expect_type(caps$languages, "character")
-  expect_true(caps$max_timestamp_kind %in% c("none", "segment", "word", "token"))
+  expect_true(
+    caps$max_timestamp_kind %in% c("none", "segment", "word", "token")
+  )
   expect_type(transcribe_supports(m, "diarization"), "logical")
 })
 
@@ -35,7 +40,9 @@ test_that("transcription produces text and well-formed tables", {
   expect_match(tolower(res$text), "country", fixed = TRUE)
 
   expect_s3_class(res$segments, "tbl_df")
-  expect_true(all(c("start", "end", "text", "speaker_id") %in% names(res$segments)))
+  expect_true(all(
+    c("start", "end", "text", "speaker_id") %in% names(res$segments)
+  ))
   expect_s3_class(res$words, "tbl_df")
   expect_s3_class(res$tokens, "tbl_df")
   expect_s3_class(res$speakers, "tbl_df")
@@ -55,7 +62,10 @@ test_that("results print and coerce", {
   pcm <- sample_audio()
   res <- transcribe(pcm, path)
 
-  expect_match(paste(cli::cli_fmt(print(res)), collapse = " "), "transcribe_result")
+  expect_match(
+    paste(cli::cli_fmt(print(res)), collapse = " "),
+    "transcribe_result"
+  )
   expect_equal(format(res), res$text)
   expect_equal(as.character(res), res$text)
   expect_s3_class(as.data.frame(res), "data.frame")
@@ -107,7 +117,10 @@ test_that("timestamps finer than the model supports are rejected", {
 
   m <- transcribe_load_model(path)
   caps <- transcribe_capabilities(m)
-  skip_if(caps$max_timestamp_kind == "token", "model supports the finest granularity")
+  skip_if(
+    caps$max_timestamp_kind == "token",
+    "model supports the finest granularity"
+  )
 
   s <- transcribe_session(m)
   expect_error(transcribe_run(s, pcm, timestamps = "token"))
@@ -135,7 +148,10 @@ test_that("session limits are readable", {
   lim <- transcribe_session_limits(s)
   expect_type(lim$effective_n_ctx, "integer")
   expect_true(is.numeric(lim$effective_max_audio))
-  expect_match(paste(cli::cli_fmt(print(s)), collapse = " "), "transcribe_session")
+  expect_match(
+    paste(cli::cli_fmt(print(s)), collapse = " "),
+    "transcribe_session"
+  )
 })
 
 test_that("tokenization returns ids or reports it is unsupported", {
@@ -186,7 +202,9 @@ test_that("diarization populates speaker rows when supported", {
   s <- transcribe_session(m)
   res <- transcribe_run(s, pcm, diarize = TRUE)
   expect_s3_class(res$speakers, "tbl_df")
-  expect_true(all(c("start", "end", "speaker_id", "p") %in% names(res$speakers)))
+  expect_true(all(
+    c("start", "end", "speaker_id", "p") %in% names(res$speakers)
+  ))
 })
 
 test_that("whisper options are accepted by whisper models", {

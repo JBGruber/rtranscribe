@@ -18,7 +18,9 @@ transcribe(
   spec_k_drafts = NULL,
   family = NULL,
   n_threads = NULL,
-  interruptible = TRUE
+  interruptible = TRUE,
+  progress = NULL,
+  verbose = FALSE
 )
 }
 \arguments{
@@ -62,7 +64,21 @@ uses the family's tuned value; \code{0} disables it.}
 Ignored when \code{model} is already a session.}
 
 \item{interruptible}{Whether \if{html}{\out{<kbd>}}Ctrl\if{html}{\out{</kbd>}}+\if{html}{\out{<kbd>}}C\if{html}{\out{</kbd>}} should cancel a
-running transcription. Defaults to \code{TRUE}.}
+running transcription. Defaults to \code{TRUE}. The key is noticed at the same
+points the status line updates, so not while the model is still encoding;
+see Details.}
+
+\item{progress}{Whether to show a live status line while the run is in
+flight. \code{NULL} (default) enables it in interactive sessions outside knitr.
+It is a spinner with an elapsed-time counter rather than a percentage
+bar: transcribe.cpp exposes no way to ask a run how far through the audio
+it is, so any percentage would be invented. The line appears as soon as
+the call starts but only moves once the model begins decoding, which on
+long audio can be many minutes later. See Details.}
+
+\item{verbose}{Emit the library's own diagnostics as the run produces them,
+rather than only after it returns. Raises the native log threshold to
+\code{"info"} for the duration of the call and restores it afterwards.}
 }
 \value{
 A \link{transcribe_result} object.

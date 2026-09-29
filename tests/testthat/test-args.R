@@ -20,8 +20,14 @@ test_that("logical toggles become the tri-state strings", {
 })
 
 test_that("invalid enum values are rejected with a helpful message", {
-  expect_error(rtranscribe:::build_run_opts(task = "summarise"), "must be one of")
-  expect_error(rtranscribe:::build_run_opts(timestamps = "millisecond"), "must be one of")
+  expect_error(
+    rtranscribe:::build_run_opts(task = "summarise"),
+    "must be one of"
+  )
+  expect_error(
+    rtranscribe:::build_run_opts(timestamps = "millisecond"),
+    "must be one of"
+  )
   expect_error(rtranscribe:::build_run_opts(pnc = "maybe"), "must be")
 })
 
@@ -49,6 +55,9 @@ test_that("timestamps are formatted for printing", {
 test_that("scalar integer checks accept NULL only when allowed", {
   expect_null(rtranscribe:::check_scalar_int(NULL))
   expect_equal(rtranscribe:::check_scalar_int(4), 4L)
-  expect_error(rtranscribe:::check_scalar_int(NULL, allow_null = FALSE), "must not be")
+  expect_error(
+    rtranscribe:::check_scalar_int(NULL, allow_null = FALSE),
+    "must not be"
+  )
   expect_error(rtranscribe:::check_scalar_int(c(1, 2)), "single number")
 })

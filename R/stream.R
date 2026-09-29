@@ -37,22 +37,27 @@ NULL
 
 #' @rdname transcribe_stream
 #' @export
-transcribe_stream_begin <- function(session,
-                                    task = "transcribe",
-                                    language = NULL,
-                                    timestamps = "auto",
-                                    diarize = NULL,
-                                    pnc = NULL,
-                                    itn = NULL,
-                                    keep_special_tags = FALSE,
-                                    family = NULL,
-                                    commit_policy = "auto",
-                                    stable_prefix_agreement_n = NULL) {
+transcribe_stream_begin <- function(
+  session,
+  task = "transcribe",
+  language = NULL,
+  timestamps = "auto",
+  diarize = NULL,
+  pnc = NULL,
+  itn = NULL,
+  keep_special_tags = FALSE,
+  family = NULL,
+  commit_policy = "auto",
+  stable_prefix_agreement_n = NULL
+) {
   if (!inherits(session, "transcribe_session")) {
     cli::cli_abort("{.arg session} must be a {.cls transcribe_session}.")
   }
   if (!is.null(session$model)) {
-    caps <- tryCatch(transcribe_capabilities(session$model), error = function(e) NULL)
+    caps <- tryCatch(
+      transcribe_capabilities(session$model),
+      error = function(e) NULL
+    )
     if (!is.null(caps) && !isTRUE(caps$supports_streaming)) {
       cli::cli_abort(c(
         "This model does not support streaming.",
@@ -64,8 +69,11 @@ transcribe_stream_begin <- function(session,
   # A run-slot extension pointed at a stream is rejected by the native layer
   # with a generic INVALID_ARG, so catch the mismatch here where the message
   # can name the right helper.
-  if (!is.null(family) && inherits(family, "transcribe_family_options") &&
-    !identical(family$slot, "stream")) {
+  if (
+    !is.null(family) &&
+      inherits(family, "transcribe_family_options") &&
+      !identical(family$slot, "stream")
+  ) {
     cli::cli_abort(c(
       "{.arg family} must be a streaming option set, but {.val {family$kind}} applies to a run.",
       "i" = "Use one of {.fn parakeet_stream_options}, {.fn parakeet_buffered_stream_options},
@@ -74,17 +82,26 @@ transcribe_stream_begin <- function(session,
   }
 
   run_opts <- build_run_opts(
-    task = task, language = language, timestamps = timestamps,
-    pnc = pnc, itn = itn, diarize = diarize,
-    keep_special_tags = keep_special_tags, family = family
+    task = task,
+    language = language,
+    timestamps = timestamps,
+    pnc = pnc,
+    itn = itn,
+    diarize = diarize,
+    keep_special_tags = keep_special_tags,
+    family = family
   )
   # The family extension belongs on the stream slot, not the run slot.
   run_opts$family <- NULL
 
   stream_opts <- list(
     family = family,
-    commit_policy = match_opt(commit_policy, c("auto", "on_finalize", "stable_prefix")),
-    stable_prefix_agreement_n = check_scalar_int(stable_prefix_agreement_n) %||% 0L
+    commit_policy = match_opt(
+      commit_policy,
+      c("auto", "on_finalize", "stable_prefix")
+    ),
+    stable_prefix_agreement_n = check_scalar_int(stable_prefix_agreement_n) %||%
+      0L
   )
 
   with_native_log(cpp_stream_begin(session$ptr, run_opts, stream_opts))
@@ -95,7 +112,9 @@ transcribe_stream_begin <- function(session,
 #' @export
 transcribe_stream_feed <- function(stream, audio) {
   if (!inherits(stream, "transcribe_stream")) {
-    cli::cli_abort("{.arg stream} must be a {.cls transcribe_stream} from {.fn transcribe_stream_begin}.")
+    cli::cli_abort(
+      "{.arg stream} must be a {.cls transcribe_stream} from {.fn transcribe_stream_begin}."
+    )
   }
   pcm <- as_pcm(audio)
   upd <- with_native_log(cpp_stream_feed(stream$session$ptr, pcm, TRUE))
@@ -110,7 +129,9 @@ transcribe_stream_finalize <- function(stream) {
   }
   upd <- with_native_log(cpp_stream_finalize(stream$session$ptr, TRUE))
   if (isTRUE(upd$truncated)) {
-    cli::cli_warn("The stream hit the model's generation cap; the transcript is incomplete.")
+    cli::cli_warn(
+      "The stream hit the model's generation cap; the transcript is incomplete."
+    )
   }
   invisible(upd)
 }
@@ -164,20 +185,27 @@ transcribe_stream_result <- function(stream) {
 #' transcribe_stream_all(s, pcm, chunk_seconds = 1)
 #'
 #' @export
-transcribe_stream_all <- function(session,
-                                  audio,
-                                  chunk_seconds = 1,
-                                  family = NULL,
-                                  language = NULL,
-                                  progress = NULL,
-                                  on_update = NULL,
-                                  ...) {
+transcribe_stream_all <- function(
+  session,
+  audio,
+  chunk_seconds = 1,
+  family = NULL,
+  language = NULL,
+  progress = NULL,
+  on_update = NULL,
+  ...
+) {
   pcm <- as_pcm(audio)
   chunk <- max(1L, as.integer(chunk_seconds * 16000))
   starts <- seq(1L, length(pcm), by = chunk)
   progress <- progress %||% interactive()
 
-  stream <- transcribe_stream_begin(session, family = family, language = language, ...)
+  stream <- transcribe_stream_begin(
+    session,
+    family = family,
+    language = language,
+    ...
+  )
   on.exit(
     {
       if (identical(transcribe_stream_state(stream)$state, "active")) {
@@ -188,7 +216,11 @@ transcribe_stream_all <- function(session,
   )
 
   if (isTRUE(progress)) {
-    id <- cli::cli_progress_bar("Streaming", total = length(starts), .envir = environment())
+    id <- cli::cli_progress_bar(
+      "Streaming",
+      total = length(starts),
+      .envir = environment()
+    )
   }
   for (i in seq_along(starts)) {
     from <- starts[[i]]
@@ -197,9 +229,13 @@ transcribe_stream_all <- function(session,
     if (!is.null(on_update)) {
       on_update(transcribe_stream_text(stream)$committed, upd)
     }
-    if (isTRUE(progress)) cli::cli_progress_update(id = id, .envir = environment())
+    if (isTRUE(progress)) {
+      cli::cli_progress_update(id = id, .envir = environment())
+    }
   }
-  if (isTRUE(progress)) cli::cli_progress_done(id = id)
+  if (isTRUE(progress)) {
+    cli::cli_progress_done(id = id)
+  }
 
   transcribe_stream_finalize(stream)
   transcribe_stream_result(stream)
@@ -208,7 +244,9 @@ transcribe_stream_all <- function(session,
 #' @export
 print.transcribe_stream <- function(x, ...) {
   st <- transcribe_stream_state(x)
-  cli::cli_text("{.cls transcribe_stream} ({.val {st$state}}, revision {st$revision})")
+  cli::cli_text(
+    "{.cls transcribe_stream} ({.val {st$state}}, revision {st$revision})"
+  )
   txt <- tryCatch(transcribe_stream_text(x), error = function(e) NULL)
   if (!is.null(txt) && !is.na(txt$committed) && nzchar(txt$committed)) {
     cli::cat_line(txt$committed, cli::col_grey(txt$tentative))

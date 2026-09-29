@@ -51,26 +51,32 @@ new_family_options <- function(kind, slot, ...) {
 #' ))
 #'
 #' @export
-whisper_options <- function(initial_prompt = NULL,
-                            prompt_tokens = NULL,
-                            prompt_condition = NULL,
-                            condition_on_prev_tokens = NULL,
-                            max_prev_context_tokens = NULL,
-                            temperature = NULL,
-                            temperature_inc = NULL,
-                            compression_ratio_thold = NULL,
-                            logprob_thold = NULL,
-                            no_speech_thold = NULL,
-                            seed = NULL,
-                            max_initial_timestamp = NULL) {
+whisper_options <- function(
+  initial_prompt = NULL,
+  prompt_tokens = NULL,
+  prompt_condition = NULL,
+  condition_on_prev_tokens = NULL,
+  max_prev_context_tokens = NULL,
+  temperature = NULL,
+  temperature_inc = NULL,
+  compression_ratio_thold = NULL,
+  logprob_thold = NULL,
+  no_speech_thold = NULL,
+  seed = NULL,
+  max_initial_timestamp = NULL
+) {
   if (!is.null(prompt_condition)) {
-    prompt_condition <- match_opt(prompt_condition, c("first_segment", "all_segments"))
+    prompt_condition <- match_opt(
+      prompt_condition,
+      c("first_segment", "all_segments")
+    )
   }
   if (!is.null(prompt_tokens)) {
     prompt_tokens <- as.integer(prompt_tokens)
   }
   new_family_options(
-    "whisper_run", "run",
+    "whisper_run",
+    "run",
     initial_prompt = initial_prompt,
     prompt_tokens = prompt_tokens,
     prompt_condition = prompt_condition,
@@ -112,15 +118,26 @@ NULL
 #' @rdname family_stream_options
 #' @export
 parakeet_stream_options <- function(att_context_right = NULL) {
-  new_family_options("parakeet_stream", "stream", att_context_right = att_context_right)
+  new_family_options(
+    "parakeet_stream",
+    "stream",
+    att_context_right = att_context_right
+  )
 }
 
 #' @rdname family_stream_options
 #' @export
-parakeet_buffered_stream_options <- function(left_ms = NULL, chunk_ms = NULL, right_ms = NULL) {
+parakeet_buffered_stream_options <- function(
+  left_ms = NULL,
+  chunk_ms = NULL,
+  right_ms = NULL
+) {
   new_family_options(
-    "parakeet_buffered_stream", "stream",
-    left_ms = left_ms, chunk_ms = chunk_ms, right_ms = right_ms
+    "parakeet_buffered_stream",
+    "stream",
+    left_ms = left_ms,
+    chunk_ms = chunk_ms,
+    right_ms = right_ms
   )
 }
 
@@ -128,16 +145,21 @@ parakeet_buffered_stream_options <- function(left_ms = NULL, chunk_ms = NULL, ri
 #' @export
 moonshine_streaming_options <- function(min_decode_interval_ms = NULL) {
   new_family_options(
-    "moonshine_streaming", "stream",
+    "moonshine_streaming",
+    "stream",
     min_decode_interval_ms = min_decode_interval_ms
   )
 }
 
 #' @rdname family_stream_options
 #' @export
-voxtral_realtime_options <- function(num_delay_tokens = NULL, min_decode_interval_ms = NULL) {
+voxtral_realtime_options <- function(
+  num_delay_tokens = NULL,
+  min_decode_interval_ms = NULL
+) {
   new_family_options(
-    "voxtral_realtime", "stream",
+    "voxtral_realtime",
+    "stream",
     num_delay_tokens = num_delay_tokens,
     min_decode_interval_ms = min_decode_interval_ms
   )
@@ -161,7 +183,9 @@ voxtral_realtime_options <- function(num_delay_tokens = NULL, min_decode_interva
 #' @export
 transcribe_accepts_options <- function(model, options) {
   if (!inherits(options, "transcribe_family_options")) {
-    cli::cli_abort("{.arg options} must come from a family option helper such as {.fn whisper_options}.")
+    cli::cli_abort(
+      "{.arg options} must come from a family option helper such as {.fn whisper_options}."
+    )
   }
   if (inherits(model, "transcribe_session")) {
     model <- model$model
@@ -174,7 +198,9 @@ transcribe_accepts_options <- function(model, options) {
 
 #' @export
 print.transcribe_family_options <- function(x, ...) {
-  cli::cli_text("{.cls transcribe_family_options} {.strong {x$kind}} ({x$slot} slot)")
+  cli::cli_text(
+    "{.cls transcribe_family_options} {.strong {x$kind}} ({x$slot} slot)"
+  )
   fields <- x[setdiff(names(x), c("kind", "slot"))]
   if (length(fields) == 0L) {
     cli::cli_bullets(c("i" = "all defaults"))

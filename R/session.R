@@ -27,7 +27,12 @@
 #'
 #' @seealso [transcribe_run()], [transcribe_session_limits()]
 #' @export
-transcribe_session <- function(model, n_threads = NULL, kv_type = "auto", n_ctx = NULL) {
+transcribe_session <- function(
+  model,
+  n_threads = NULL,
+  kv_type = "auto",
+  n_ctx = NULL
+) {
   ptr <- model_ptr(model)
   n_threads <- check_scalar_int(n_threads) %||% 0L
   n_ctx <- check_scalar_int(n_ctx) %||% 0L
@@ -55,7 +60,9 @@ session_ptr <- function(x, arg = "session") {
   if (inherits(x, "transcribe_stream")) {
     return(x$session$ptr)
   }
-  cli::cli_abort("{.arg {arg}} must be a {.cls transcribe_session}, not {.obj_type_friendly {x}}.")
+  cli::cli_abort(
+    "{.arg {arg}} must be a {.cls transcribe_session}, not {.obj_type_friendly {x}}."
+  )
 }
 
 #' Effective limits of a session
@@ -91,7 +98,11 @@ print.transcribe_session <- function(x, ...) {
   cli::cli_bullets(c("*" = "stream state: {.val {st$state}}"))
   lim <- tryCatch(transcribe_session_limits(x), error = function(e) NULL)
   if (!is.null(lim)) {
-    ctx <- if (lim$effective_n_ctx > 0) as.character(lim$effective_n_ctx) else "unbounded"
+    ctx <- if (lim$effective_n_ctx > 0) {
+      as.character(lim$effective_n_ctx)
+    } else {
+      "unbounded"
+    }
     aud <- if (is.finite(lim$effective_max_audio)) {
       paste0(round(lim$effective_max_audio), "s")
     } else {

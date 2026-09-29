@@ -54,12 +54,21 @@ print.transcribe_result <- function(x, n = 5, ...) {
   cli::cli_text(hdr)
 
   bullets <- character(0)
-  if (nzchar(x$language)) bullets <- c(bullets, "*" = "language: {.val {x$language}}")
+  if (nzchar(x$language)) {
+    bullets <- c(bullets, "*" = "language: {.val {x$language}}")
+  }
   bullets <- c(bullets, "*" = "timestamps: {.val {x$timestamp_kind}}")
   if (!is.na(x$audio_seconds)) {
     rtf <- x$timings$encode + x$timings$decode + x$timings$mel
-    speed <- if (!is.na(rtf) && rtf > 0) sprintf(" (%.1fx real time)", x$audio_seconds / rtf) else ""
-    bullets <- c(bullets, "*" = paste0("audio: {round(x$audio_seconds, 1)}s", speed))
+    speed <- if (!is.na(rtf) && rtf > 0) {
+      sprintf(" (%.1fx real time)", x$audio_seconds / rtf)
+    } else {
+      ""
+    }
+    bullets <- c(
+      bullets,
+      "*" = paste0("audio: {round(x$audio_seconds, 1)}s", speed)
+    )
   }
   bullets <- c(bullets, "*" = "{nseg} segment{?s}, {nrow(x$words)} word{?s}")
   if (nrow(x$speakers) > 0) {
@@ -75,12 +84,21 @@ print.transcribe_result <- function(x, n = 5, ...) {
       spk <- show$speaker_id[[i]]
       lbl <- if (!is.na(spk)) paste0(" S", spk) else ""
       cli::cat_line(
-        cli::col_grey(sprintf("[%s -> %s]%s ", format_ts(show$start[[i]]), format_ts(show$end[[i]]), lbl)),
+        cli::col_grey(sprintf(
+          "[%s -> %s]%s ",
+          format_ts(show$start[[i]]),
+          format_ts(show$end[[i]]),
+          lbl
+        )),
         trimws(show$text[[i]])
       )
     }
     if (nseg > n) {
-      cli::cat_line(cli::col_grey(sprintf("... %d more segment%s", nseg - n, if (nseg - n > 1) "s" else "")))
+      cli::cat_line(cli::col_grey(sprintf(
+        "... %d more segment%s",
+        nseg - n,
+        if (nseg - n > 1) "s" else ""
+      )))
     }
   } else if (nzchar(x$text)) {
     cli::cli_rule()
@@ -113,9 +131,13 @@ format.transcribe_result <- function(x, ...) {
 #' as.data.frame(res, which = "words")
 #'
 #' @export
-as.data.frame.transcribe_result <- function(x, row.names = NULL, optional = FALSE,
-                                            which = c("auto", "segments", "words", "tokens", "speakers"),
-                                            ...) {
+as.data.frame.transcribe_result <- function(
+  x,
+  row.names = NULL,
+  optional = FALSE,
+  which = c("auto", "segments", "words", "tokens", "speakers"),
+  ...
+) {
   which <- match.arg(which)
   if (which == "auto") {
     which <- if (nrow(x$words) > 0) "words" else "segments"

@@ -29,7 +29,7 @@ Distribution is GitHub + r-universe. **Not CRAN** yet, which is why the
 | `src/Makevars.in`, `Makevars.win.in` | Templates; `configure` substitutes `@PKG_LIBS@` / `@VENDOR_INC@` |
 | `configure`, `cleanup` | Drive the CMake build and tear it down. `.win` variants are unproven |
 | `tools/vendor.sh` | Re-syncs the vendored tree from an upstream ref |
-| `tests/testthat/` | 7 test files plus `helper-rtranscribe.R`, which holds the model-gating skips |
+| `tests/testthat/` | 8 test files plus `helper-rtranscribe.R`, which holds the model-gating skips |
 | `inst/extdata/` | `jfk.wav` (~11 s, offline tests) and `german.wav` (translation test) |
 | `plan.md` | Test plan for the unverified CUDA backend on an RTX 3060 machine (it previously held the original build plan, which the code has superseded) |
 
@@ -47,7 +47,7 @@ Distribution is GitHub + r-universe. **Not CRAN** yet, which is why the
 | `download.R` | The static `transcribe_registry` tibble, `transcribe_models()`, HF catalogue fetch, downloader |
 | `audio.R` | `transcribe_read_audio()` via `av`, `without_av_noise()` |
 | `devices.R` | Version, device listing, backend probe, `transcribe_set_verbosity()` |
-| `utils.R` | Argument validators, the native-log drain, timestamp formatting |
+| `utils.R` | Argument validators, the native-log drain, timestamp formatting, the run-progress heartbeat |
 
 ## Architecture
 
@@ -92,12 +92,76 @@ worker threads, **so it must never touch R** — it appends under a mutex, and
 native call returns. `with_native_log()` wraps calls so the drain happens even
 on error.
 
-### Interrupts
+### Interrupts and the progress heartbeat
 
-Long runs are Ctrl-C-able. The mechanism (`transcribe_glue.cpp:334-380`):
-`interrupt_pending()` probes via `R_ToplevelExec`, an abort callback tells the
-library to stop, and `g_interrupted` is re-raised after the native call
-unwinds. See the gotcha below for why the flag is not optional.
+Long runs are Ctrl-C-able. The mechanism (the `RunHooks` block in
+`transcribe_glue.cpp`): `interrupt_pending()` probes via `R_ToplevelExec`, an
+abort callback tells the library to stop, and `g_interrupted` is re-raised
+after the native call unwinds. See the gotcha below for why the flag is not
+optional.
+
+The same abort callback doubles as the **only** progress hook there is, which
+is why `transcribe_run(progress =)` shows a spinner and not a percentage:
+
+- The C API has no progress callback. `transcribe_run_params` carries no such
+  field — verified identical from the pinned `v0.1.3-4` all the way to
+  upstream HEAD — and nothing upstream logs a percentage.
+- The position *exists* but never escapes. Whisper's seek loop
+  (`arch/whisper/model.cpp`) is `while (seek < total_mel_frames)` with the
+  abort poll at the top, so `seek / total_mel_frames` is the fraction. Every
+  public accessor is gated on `has_result`, which the families only flip in
+  `commit_result()` at the end, so `transcribe_n_segments()` returns 0 for the
+  whole run. Do not "fix" this by reaching into `src/transcribe-session.h` —
+  that is an internal header and the tree is unmodified by policy.
+- The real fix is upstream: a progress callback on `transcribe_run_params`,
+  set from the seek loop where `seek` is already in scope.
+
+So `RunHooks` also carries an R closure, called from `abort_callback` and
+throttled against `steady_clock` (`rtranscribe.tick_interval`, default 0.1 s,
+because the poll fires every decode step). Constraints that are not obvious:
+
+- **The tick must never raise.** It is evaluated re-entrantly with the
+  library's C++ frames live, so it goes through `R_ToplevelExec` like the
+  interrupt probe, and `run_ticker()` wraps its body in `tryCatch` as well.
+- **A failed tick stops ticking; it does not abort.** `R_ToplevelExec` cannot
+  tell an error from an interrupt the tick's own R code consumed. Aborting
+  would turn a cli formatting slip into a spurious "interrupted by user";
+  stopping costs at most one extra Ctrl-C, since the next poll is one decode
+  step away.
+- **cli evaluates a format string in `.envir`**, i.e. the *caller's* frame. A
+  `{dur}` referring to a local of the function that built the bar never
+  resolves, every redraw fails, and — because the tick swallows errors — the
+  bar silently never paints. `ticker_format()` bakes the text in for exactly
+  this reason.
+- **Nothing polls during the encoder pass** ("mid-encoder abort is not
+  supported today"), so the spinner cannot move until the first decode step.
+  For whisper that is one window away. Measured with whisper-tiny on CPU:
+  long-form (176 s audio, 6 chunks) first ticks 0.3 s in with a worst gap of
+  2.7 s, and short-form (11 s, one chunk) waits 3.2 s of a 7.4 s run.
+- **For encoder + LLM families the wait grows with the audio.** MOSS encodes
+  every 30 s chunk in `encode_one()` without polling, then prefills the whole
+  prompt (12.5 audio tokens/s plus a time marker every 5 s, so ~31k tokens for
+  38.8 min) as **one** `ggml_backend_sched_graph_compute`. On that recording
+  (default build, 8 threads) about ten minutes of encoder were followed by a
+  prefill still running four minutes later, with no tick at any point.
+  MOSS on `jfk.wav` was already blank for 43 s of 67 s. So the gap is worst
+  on long audio, where progress matters most, and Ctrl-C is dead for the same
+  stretch. Upstream HEAD (`c1fee503`) chunks the prefill (`prefill_chunked()`,
+  from 80c7011) but polls neither between prefill chunks nor between encoder
+  chunks, so re-vendoring does not fix this. The upstream fix is one
+  `poll_abort()` in each of those two loops.
+- **The line is therefore drawn before the native call**, not on the first
+  tick. `run_ticker()` creates the bar with status `ticker_waiting`
+  ("encoding, updates start with decoding") and forces one render past cli's
+  2 s show-after delay. Each tick replaces the status with the elapsed time
+  since the bar was created (`format_elapsed()`), so the format string holds
+  only `{cli::pb_spin}` and `{cli::pb_status}`. cli redraws an unforced update
+  only when its own timer is due, so a test cannot observe a tick's redraw
+  directly. It checks the line cli prints when the bar closes under
+  `cli.dynamic = FALSE`, which carries the last status.
+
+`transcribe_stream_all()` is the one path with genuine per-chunk progress,
+because there R drives the chunk loop and the library keeps the context.
 
 ## Build
 

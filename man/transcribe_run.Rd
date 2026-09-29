@@ -17,7 +17,9 @@ transcribe_run(
   keep_special_tags = FALSE,
   spec_k_drafts = NULL,
   family = NULL,
-  interruptible = TRUE
+  interruptible = TRUE,
+  progress = NULL,
+  verbose = FALSE
 )
 }
 \arguments{
@@ -57,7 +59,21 @@ uses the family's tuned value; \code{0} disables it.}
 \item{family}{Family-specific options from \code{\link[=whisper_options]{whisper_options()}} and friends.}
 
 \item{interruptible}{Whether \if{html}{\out{<kbd>}}Ctrl\if{html}{\out{</kbd>}}+\if{html}{\out{<kbd>}}C\if{html}{\out{</kbd>}} should cancel a
-running transcription. Defaults to \code{TRUE}.}
+running transcription. Defaults to \code{TRUE}. The key is noticed at the same
+points the status line updates, so not while the model is still encoding;
+see Details.}
+
+\item{progress}{Whether to show a live status line while the run is in
+flight. \code{NULL} (default) enables it in interactive sessions outside knitr.
+It is a spinner with an elapsed-time counter rather than a percentage
+bar: transcribe.cpp exposes no way to ask a run how far through the audio
+it is, so any percentage would be invented. The line appears as soon as
+the call starts but only moves once the model begins decoding, which on
+long audio can be many minutes later. See Details.}
+
+\item{verbose}{Emit the library's own diagnostics as the run produces them,
+rather than only after it returns. Raises the native log threshold to
+\code{"info"} for the duration of the call and restores it afterwards.}
 }
 \value{
 A \link{transcribe_result} object.
@@ -67,6 +83,38 @@ The low-level run entry point. Use this when you want to reuse one loaded
 model and session across many calls; see \code{\link[=transcribe]{transcribe()}} for the one-call
 convenience wrapper.
 }
+\section{Why there is no percentage or ETA}{
+The C API has no progress callback, and no accessor reports a run's
+position through the audio. The only hook that fires mid-run is the abort
+callback used for \if{html}{\out{<kbd>}}Ctrl\if{html}{\out{</kbd>}}+\if{html}{\out{<kbd>}}C\if{html}{\out{</kbd>}}, which carries no position
+information -- so \code{progress = TRUE} can honestly report that work is
+happening and how long it has taken, but not how much is left.
+
+For a real progress bar, \code{\link[=transcribe_stream_all]{transcribe_stream_all()}} reports genuine
+per-chunk progress on models that support streaming, because there R drives
+the chunk loop.
+}
+
+\section{Why the status line can sit on "encoding"}{
+The line is drawn when the call starts and reads "encoding" until the first
+poll of that abort callback. The library polls between decode steps (and,
+for some models, between chunks), never inside the encoder or inside the
+pass that feeds the encoded audio to a language-model decoder. How long
+that takes depends on the model:
+\itemize{
+\item Whisper encodes one 30-second window before its first decode step, so
+the line starts moving after the first window.
+\item Models that encode the whole recording and then prefill all of it in a
+single pass, such as MOSS-Transcribe-Diarize, stay on "encoding" for a
+time that grows with the length of the audio: many minutes for a
+recording of half an hour or more on CPU.
+}
+
+\if{html}{\out{<kbd>}}Ctrl\if{html}{\out{</kbd>}}+\if{html}{\out{<kbd>}}C\if{html}{\out{</kbd>}} goes through the same poll, so it is not
+noticed during that stretch either. Once the line moves, the elapsed time
+counts from the start of the call, silent stretch included.
+}
+
 \examples{
 \dontshow{if (FALSE) withAutoprint(\{ # examplesIf}
 m <- transcribe_load_model("model.gguf")

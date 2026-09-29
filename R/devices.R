@@ -44,9 +44,13 @@ transcribe_devices <- function() {
   devs <- cpp_devices()
   if (length(devs) == 0L) {
     return(as_result_tbl(list(
-      name = character(0), description = character(0), kind = character(0),
-      device_id = character(0), device_type = character(0),
-      memory_total = numeric(0), memory_free = numeric(0)
+      name = character(0),
+      description = character(0),
+      kind = character(0),
+      device_id = character(0),
+      device_type = character(0),
+      memory_total = numeric(0),
+      memory_free = numeric(0)
     )))
   }
   as_result_tbl(list(
@@ -63,7 +67,10 @@ transcribe_devices <- function() {
 #' @rdname transcribe_devices
 #' @export
 transcribe_backend_available <- function(kind) {
-  kind <- match_opt(kind, c("auto", "cpu", "cpu_accel", "metal", "vulkan", "cuda"))
+  kind <- match_opt(
+    kind,
+    c("auto", "cpu", "cpu_accel", "metal", "vulkan", "cuda")
+  )
   cpp_backend_available(kind)
 }
 
@@ -83,12 +90,15 @@ transcribe_backend_available <- function(kind) {
 #' transcribe_set_verbosity(old)
 #'
 #' @export
-transcribe_set_verbosity <- function(level = c("warn", "none", "error", "info", "debug")) {
+transcribe_set_verbosity <- function(
+  level = c("warn", "none", "error", "info", "debug")
+) {
   level <- match.arg(level)
   old <- the$verbosity
   # Severity rank understood by the native sink: 0 = errors only, rising to
   # 3 = everything including debug.
-  rank <- switch(level,
+  rank <- switch(
+    level,
     none = -1L,
     error = 0L,
     warn = 1L,

@@ -51,12 +51,7 @@ transcribe_registry <- tibble::tibble(
 #'
 #' @noRd
 hf_gguf_models <- function(user = "handy-computer", quant = "Q8_0") {
-  if (!requireNamespace("httr2", quietly = TRUE)) {
-    cli::cli_abort(c(
-      "{.code refresh = TRUE} requires the {.pkg httr2} package.",
-      "i" = 'Install it with {.run install.packages("httr2")}.'
-    ))
-  }
+  rlang::check_installed("httr22", "when `refresh = TRUE`")
 
   ua <- "rtranscribe (https://github.com/JBGruber/rtranscribe)"
   req <- httr2::request("https://huggingface.co/api/models")
@@ -157,7 +152,11 @@ registry_cache_file <- function() {
 #' @noRd
 registry_merge <- function(extra) {
   reg <- transcribe_registry
-  if (!is.data.frame(extra) || nrow(extra) == 0 || !all(names(reg) %in% names(extra))) {
+  if (
+    !is.data.frame(extra) ||
+      nrow(extra) == 0 ||
+      !all(names(reg) %in% names(extra))
+  ) {
     return(reg)
   }
   extra <- extra[!extra$name %in% reg$name, names(reg), drop = FALSE]
@@ -364,8 +363,10 @@ transcribe_download_model <- function(
       "Unknown model {.val {name}}.",
       "i" = "See {.fn transcribe_models} for the known names, or pass a direct URL.",
       if (!requireNamespace("httr2", quietly = TRUE)) {
-        c("i" = "The full {.field handy-computer} catalogue could not be searched:
-                 install {.pkg httr2} with {.run install.packages(\"httr2\")}.")
+        c(
+          "i" = "The full {.field handy-computer} catalogue could not be searched:
+                 install {.pkg httr2} with {.run install.packages(\"httr2\")}."
+        )
       }
     ))
   }

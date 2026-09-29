@@ -18,7 +18,8 @@ transcribe_run_batch(
   spec_k_drafts = NULL,
   family = NULL,
   interruptible = TRUE,
-  progress = NULL
+  progress = NULL,
+  verbose = FALSE
 )
 }
 \arguments{
@@ -57,10 +58,19 @@ uses the family's tuned value; \code{0} disables it.}
 \item{family}{Family-specific options from \code{\link[=whisper_options]{whisper_options()}} and friends.}
 
 \item{interruptible}{Whether \if{html}{\out{<kbd>}}Ctrl\if{html}{\out{</kbd>}}+\if{html}{\out{<kbd>}}C\if{html}{\out{</kbd>}} should cancel a
-running transcription. Defaults to \code{TRUE}.}
+running transcription. Defaults to \code{TRUE}. The key is noticed at the same
+points the status line updates, so not while the model is still encoding;
+see Details.}
 
-\item{progress}{Whether to show a progress bar. Defaults to \code{TRUE} in
-interactive sessions.}
+\item{progress}{Whether to show progress. Defaults to \code{TRUE} in interactive
+sessions. Decoding the inputs is a real bar with a percentage; the
+transcription itself is one native call with no position reporting, so it
+falls back to the same spinner \code{\link[=transcribe_run]{transcribe_run()}} uses, with the same wait
+before it first moves (see Details there).}
+
+\item{verbose}{Emit the library's own diagnostics as the run produces them,
+rather than only after it returns. Raises the native log threshold to
+\code{"info"} for the duration of the call and restores it afterwards.}
 }
 \value{
 A list of \link{transcribe_result} objects, one per input.

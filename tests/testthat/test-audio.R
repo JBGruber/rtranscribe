@@ -92,7 +92,9 @@ test_that("transcribe_models() returns the curated set by default", {
   expect_s3_class(m, "tbl_df")
   expect_gt(nrow(m), 0)
   expect_equal(nrow(m), nrow(rtranscribe:::transcribe_registry))
-  expect_true(all(c("name", "family", "size_mb", "wer", "downloaded", "note") %in% names(m)))
+  expect_true(all(
+    c("name", "family", "size_mb", "wer", "downloaded", "note") %in% names(m)
+  ))
   expect_type(m$downloaded, "logical")
 })
 
@@ -100,7 +102,10 @@ test_that("unknown model names are rejected before any download", {
   local_model_cache()
   local_mocked_bindings(hf_gguf_models = function(...) stop("no network"))
 
-  expect_error(transcribe_download_model("not-a-model", quiet = TRUE), "Unknown model")
+  expect_error(
+    transcribe_download_model("not-a-model", quiet = TRUE),
+    "Unknown model"
+  )
 })
 
 test_that("a failed refresh warns and falls back to the curated set", {
@@ -129,8 +134,10 @@ test_that("refresh appends unannotated rows below the curated ones", {
   expect_equal(anyDuplicated(m$name), 0L)
 
   # and the appended model becomes resolvable for download
-  expect_equal(rtranscribe:::model_entry("brand-new-model")$repo,
-               "handy-computer/brand-new-model-gguf")
+  expect_equal(
+    rtranscribe:::model_entry("brand-new-model")$repo,
+    "handy-computer/brand-new-model-gguf"
+  )
 })
 
 test_that("refresh reaches the real catalogue", {
@@ -188,7 +195,13 @@ test_that("the automatic catalogue lookup happens at most once per session", {
     fake_catalogue()
   })
 
-  expect_error(transcribe_download_model("no-such-model", quiet = TRUE), "Unknown model")
-  expect_error(transcribe_download_model("also-not-a-model", quiet = TRUE), "Unknown model")
+  expect_error(
+    transcribe_download_model("no-such-model", quiet = TRUE),
+    "Unknown model"
+  )
+  expect_error(
+    transcribe_download_model("also-not-a-model", quiet = TRUE),
+    "Unknown model"
+  )
   expect_equal(calls, 1L)
 })
